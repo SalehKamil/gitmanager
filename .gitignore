@@ -12,3 +12,6 @@ images/
 img/
 figures/
 figure/
+
+# Outils locaux (skills, reglages de Claude) : hors du depot
+.claude/
