@@ -10,24 +10,26 @@ Lancement :
     uv run gitmanager.py
     (ou : python gitmanager.py)
 
-Au demarrage, choisis l'ordinateur :
+Au demarrage : "Que veux-tu faire ?"
 
-  1. Ordinateur perso
-     Connexion a GitHub par le navigateur (aucun token a creer ni a coller),
-     via GitHub CLI (gh) ou Git Credential Manager (inclus dans Git pour Windows).
-     - Tous tes depots : voir, parcourir les fichiers et les commits,
-       rendre public / prive, cloner, supprimer.
-     - Tes projets : git init, commit, push, pull, ecraser, supprimer le .git.
+  1. Gerer et parcourir tes depots GitHub (ordinateur perso)
+     - Envoyer un projet de cet ordinateur : le script propose les projets
+       git trouves sur la machine, puis commit, push, pull, public / prive.
+     - Parcourir tes depots GitHub : fichiers, commits, cloner, supprimer.
 
-  2. Ordinateur entreprise
-     Copie le contenu du dossier de ce script (sans gitmanager.py ni .git)
-     vers un dossier de destination qui contient deja le .git du depot
-     interne, puis commit + push. Pas de git init, pas de connexion GitHub :
-     git utilise les identifiants deja configures sur ce PC.
+  2. Synchroniser un depot sur l'ordinateur de l'entreprise
+     Recupere ton depot GitHub (public, sans identifiants) dans un dossier
+     temporaire, remplace le contenu du dossier git du depot de l'entreprise
+     par ce projet, puis commit + push avec le compte de l'entreprise
+     (seconde authentification, distincte du compte perso).
+
+Securite : HTTPS ou SSH seulement, certificats toujours verifies, aucun
+jeton ecrit sur le disque, dans une URL ni sur la ligne de commande.
 """
 
 import base64
 import filecmp
+import getpass
 import json
 import os
 import re
@@ -35,6 +37,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -43,7 +46,6 @@ from datetime import datetime
 from pathlib import Path
 
 CONFIG = Path.home() / ".gitmanager.json"
-NOM_SCRIPT = "gitmanager.py"
 
 GITIGNORE = """__pycache__/
 *.py[cod]
@@ -77,12 +79,18 @@ LIMITE_GITHUB = 100 * 1024 * 1024  # GitHub refuse les fichiers > 100 Mo
 
 # Dossiers ignores quand on cherche des projets
 DOSSIERS_IGNORES = {"node_modules", ".venv", "venv", "env", "__pycache__",
-                    "dist", "build", ".git"}
+                    "dist", "build", ".git", "AppData", "Library", "Applications",
+                    "Program Files", "Program Files (x86)", "Windows"}
 # Dossiers jamais copies vers l'entreprise (propres a chaque ordinateur)
 EXCLUS_COPIE = {".git", "__pycache__", ".venv", "venv", "node_modules",
                 ".mypy_cache", ".pytest_cache", ".ruff_cache"}
+# Endroits ou chercher les projets de l'ordinateur (relatifs au dossier perso)
+EMPLACEMENTS = ("", "Documents", "Desktop", "Bureau", "Projects", "Projets",
+                "projets", "dev", "code", "src", "repos", "source/repos", "GitHub",
+                "Documents/GitHub", "OneDrive/Documents", "workspace")
 
-MODE = {"nom": "perso"}  # "perso" ou "entreprise"
+# "perso" ou "entreprise" ; jeton du serveur de l'entreprise, en memoire seulement
+MODE = {"nom": "perso", "utilisateur": "", "jeton": ""}
 BRUIT_GIT = re.compile(r"(LF will be replaced by CRLF|CRLF will be replaced by LF)", re.I)
 STATUTS = {"A": "ajoute", "M": "modifie", "D": "supprime", "R": "renomme",
            "C": "copie", "T": "modifie", "U": "conflit"}
@@ -233,12 +241,48 @@ class Arret(Exception):
         self.statut, self.detail = statut, detail
 
 
-def _env_git():
+# Aide d'identification git qui lit le jeton dans l'environnement du processus :
+# le jeton n'apparait ni dans la ligne de commande, ni dans un fichier.
+AIDE_JETON = ('!f() { test "$1" = get || exit 0; '
+              'echo "username=${GM_UTILISATEUR:-x-access-token}"; '
+              'echo "password=$GM_JETON"; }; f')
+
+
+def identite_courante():
+    """(utilisateur, jeton) a utiliser pour git, ou None (gestionnaire du PC)."""
+    if MODE["nom"] == "entreprise":
+        return (MODE["utilisateur"], MODE["jeton"]) if MODE["jeton"] else None
+    if SESSION["methode"] == "jeton" and SESSION["token"]:
+        return ("", SESSION["token"])
+    return None
+
+
+def _env_git(identite=None, anonyme=False):
+    """Environnement de chaque commande git : HTTPS ou SSH seulement,
+    certificats verifies, identifiants jamais sur la ligne de commande."""
     env = dict(os.environ)
-    if MODE["nom"] == "perso":
+    env.pop("GIT_SSL_NO_VERIFY", None)
+    env["GIT_ALLOW_PROTOCOL"] = "https:ssh:file"  # pas de http:// ni git:// en clair
+    config = [("http.sslVerify", "true")]
+    identite = None if anonyme else (identite or identite_courante())
+    if anonyme or identite:
+        config.append(("credential.helper", ""))  # ignore les gestionnaires du PC
+    if identite:
+        config.append(("credential.helper", AIDE_JETON))
+        env["GM_UTILISATEUR"], env["GM_JETON"] = identite
+    try:
+        base = int(env.get("GIT_CONFIG_COUNT") or 0)
+    except ValueError:
+        base = 0
+    for i, (cle, valeur) in enumerate(config, base):
+        env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = cle, valeur
+    env["GIT_CONFIG_COUNT"] = str(base + len(config))
+    if anonyme or MODE["nom"] == "perso":
         # Jamais d'invite "Username / Password" : l'acces passe par la
-        # connexion navigateur (gh ou Git Credential Manager).
+        # connexion navigateur (gh, Git Credential Manager) ou un jeton.
         env["GIT_TERMINAL_PROMPT"] = "0"
+    if anonyme:
+        env["GCM_INTERACTIVE"] = "never"
     return env
 
 
@@ -246,13 +290,13 @@ def _affiche(args):
     return " ".join(f'"{a}"' if (" " in str(a) or not str(a)) else str(a) for a in args)
 
 
-def git(*args, cwd=None, quiet=False):
+def git(*args, cwd=None, quiet=False, env=None):
     """Execute une commande git. Retourne (code, stdout, stderr)."""
     cmd = ["git", "-c", "core.quotepath=off"] + [str(a) for a in args]
     if not quiet:
         print(c("  $ git " + _affiche(args), "90"))
     p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", env=_env_git())
+                       encoding="utf-8", errors="replace", env=env or _env_git())
     out, errs = (p.stdout or "").rstrip(), (p.stderr or "").strip()
     if not quiet:
         for flux in (out, errs):
@@ -271,8 +315,13 @@ def git_direct(*args, cwd=None):
 
 def git_ok():
     if shutil.which("git"):
-        return True
-    err("git est introuvable dans le PATH.")
+        _, out, _ = git("--version", quiet=True)
+        m = re.search(r"(\d+)\.(\d+)", out)
+        if m and (int(m.group(1)), int(m.group(2))) >= (2, 31):
+            return True
+        err(f"Git 2.31 ou plus est requis ({out or 'version inconnue'}).")
+    else:
+        err("git est introuvable dans le PATH.")
     info("Windows : winget install --id Git.Git -e")
     info("macOS   : xcode-select --install")
     info("Linux   : sudo apt install git")
@@ -476,7 +525,8 @@ def url_web(url):
 # Connexion GitHub par le navigateur (gh ou Git Credential Manager)
 
 SESSION = {"token": "", "user": None, "methode": None}
-NOMS_METHODES = {"gh": "GitHub CLI", "gcm": "Git Credential Manager"}
+NOMS_METHODES = {"gh": "GitHub CLI", "gcm": "Git Credential Manager",
+                 "jeton": "jeton en memoire"}
 _CACHE_GCM = []
 
 
@@ -557,9 +607,9 @@ def oublier_gcm(cfg):
     run(_cmd_gcm("reject"), f"protocol=https\nhost={host(cfg)}\n\n")
 
 
-def configurer_helper_gcm(cfg):
+def configurer_helper_gcm(serveur):
     """Fait passer git push/pull par GCM pour ce serveur (comme gh auth setup-git)."""
-    cle = f"credential.https://{host(cfg)}.helper"
+    cle = f"credential.https://{serveur}.helper"
     git("config", "--global", "--unset-all", cle, quiet=True)
     git("config", "--global", "--add", cle, "", quiet=True)
     git("config", "--global", "--add", cle, helper_gcm(), quiet=True)
@@ -645,8 +695,8 @@ def installer_gh():
     elif sys.platform == "darwin" and shutil.which("brew"):
         cmd = ["brew", "install", "gh"]
     else:
-        info("Installe GitHub CLI puis relance ce script : https://cli.github.com")
-        info("Ubuntu / Debian : sudo apt install gh")
+        info("Connexion par le navigateur : installe GitHub CLI (https://cli.github.com,")
+        info("Ubuntu / Debian : sudo apt install gh) puis relance le script.")
         return None
     if not ask_yn("Installer GitHub CLI maintenant ?", True):
         return None
@@ -658,10 +708,44 @@ def installer_gh():
     return None
 
 
+def demander_secret(serveur, avec_utilisateur=False):
+    """Jeton (ou mot de passe) saisi sans affichage. Il reste en memoire :
+    rien n'est ecrit sur le disque. Retourne (utilisateur, secret)."""
+    info(f"Jeton GitHub : https://{serveur}/settings/tokens (de preference un jeton")
+    info("fin, limite aux depots utiles). Il reste en memoire, rien n'est ecrit.")
+    utilisateur = ask("Nom d'utilisateur (Entree pour un jeton GitHub)", "",
+                      obligatoire=False) if avec_utilisateur else ""
+    try:
+        secret = getpass.getpass(c("  Jeton ou mot de passe (saisie masquee) : ", "1"))
+    except (EOFError, KeyboardInterrupt):
+        secret = ""
+    return utilisateur, secret.strip()
+
+
+def connexion_jeton(cfg):
+    """Connexion par jeton d'acces, garde en memoire le temps de la session."""
+    _, tok = demander_secret(host(cfg))
+    if not tok:
+        warn("Aucun jeton saisi.")
+        return False
+    code, user, _ = requete(cfg, "GET", "/user", token=tok)
+    if code != 200:
+        err(f"Jeton refuse ({code or 'reseau'}) : {message_api(user)}")
+        return False
+    SESSION.update(token=tok, user=user, methode="jeton")
+    cfg["login"] = user.get("login")
+    sauver(cfg)
+    configurer_identite(cfg, user)
+    ok(f"Connecte a GitHub en tant que {user.get('login')} (jeton en memoire)")
+    return True
+
+
 def connexion_navigateur(cfg):
     """Connexion interactive : ouvre le navigateur. Retourne True si connecte."""
     methode = methode_dispo(cfg) or installer_gh()
     if not methode:
+        if ask_yn("Se connecter avec un jeton d'acces a la place ?", True):
+            return connexion_jeton(cfg)
         return False
     h = host(cfg)
     print()
@@ -679,7 +763,7 @@ def connexion_navigateur(cfg):
         tok = token_silencieux(cfg, "gh")
     else:
         info("Une fenetre GitHub va s'ouvrir : choisis 'Sign in with your browser'.")
-        configurer_helper_gcm(cfg)
+        configurer_helper_gcm(h)
         tok = credential_gcm(cfg, interactif=True)
         code, _, _ = requete(cfg, "GET", "/user", token=tok) if tok else (0, None, None)
         if code == 401:  # identifiants memorises mais revoques : on recommence
@@ -793,13 +877,12 @@ def expliquer(sortie):
 def nettoyer_depot(chemin, bavard=True):
     """Repare ce que l'ancienne version du script laissait dans .git/config."""
     noms = remotes(chemin)
-    if MODE["nom"] == "perso":
-        for r in noms:
-            url = url_remote(r, chemin)
-            if contient_token(url):
-                git("remote", "set-url", r, sans_identifiants(url), cwd=chemin, quiet=True)
-                if bavard:
-                    info(f"Token retire de l'URL du remote '{r}'.")
+    for r in noms:  # un identifiant en clair dans .git/config est un secret expose
+        url = url_remote(r, chemin)
+        if contient_token(url):
+            git("remote", "set-url", r, sans_identifiants(url), cwd=chemin, quiet=True)
+            if bavard:
+                info(f"Identifiant en clair retire de l'adresse du remote '{r}'.")
     # "git push -u <url>" ecrivait l'URL comme amont de la branche
     _, out, _ = git("config", "--local", "--get-regexp", r"^branch\..*\.remote$",
                     cwd=chemin, quiet=True)
@@ -884,13 +967,13 @@ def proteger_fichiers(chemin, auto):
     return tous
 
 
-def committer(cfg, chemin, message=None, auto=False):
+def committer(cfg, chemin, message=None, auto=False, proposer_gitignore=True):
     """git add -A + git commit. Retourne le nombre de fichiers commites."""
     if not fichiers_modifies(chemin):
         if not auto:
             info("Aucune modification : tous les fichiers sont identiques au dernier commit.")
         return 0
-    if not auto and not (Path(chemin) / ".gitignore").exists():
+    if not auto and proposer_gitignore and not (Path(chemin) / ".gitignore").exists():
         warn("Pas de .gitignore : risque d'envoyer .venv, node_modules, caches...")
         if ask_yn("En creer un standard (Python / Node) ?", True):
             (Path(chemin) / ".gitignore").write_text(GITIGNORE, encoding="utf-8")
@@ -1073,7 +1156,7 @@ def relier(cfg, chemin):
               "", obligatoire=False)
     if not url:
         return None
-    git("remote", "add", "origin", url, cwd=chemin)
+    git("remote", "add", "origin", verifier_url(url), cwd=chemin)
     return "origin"
 
 
@@ -1442,23 +1525,22 @@ def menu_projet(cfg, chemin):
     if remote and git("fetch", remote, cwd=chemin, quiet=True)[0] != 0:
         warn("Serveur injoignable : l'etat 'a envoyer / a recuperer' peut etre ancien.")
     actions = {
-        "1": voir_modifs, "2": act_commit, "3": act_push, "4": act_commit_push,
-        "5": act_pull, "6": act_ecraser, "7": act_visibilite_projet, "8": act_relier,
+        "1": act_commit_push, "2": act_pull, "3": voir_modifs, "4": act_commit,
+        "5": act_push, "6": act_visibilite_projet, "7": act_relier, "8": act_ecraser,
     }
     while True:
         titre("Projet local")
         entete_projet(chemin)
         relie = bool(remote_principal(chemin))
         print()
-        print("    1. Voir les modifications")
-        print("    2. Commit          (enregistrer les modifications sur ce PC)")
-        print("    3. Push            (envoyer les commits sur GitHub)")
-        print("    4. Commit + Push   (tout en un)")
-        print("    5. Pull            (recuperer depuis GitHub)")
-        print("    6. Ecraser GitHub avec ce dossier (force push)")
-        if MODE["nom"] == "perso":
-            print("    7. Rendre le depot public / prive")
-        print("    8. " + ("Relier a un autre depot GitHub" if relie else "Relier a GitHub"))
+        print("    1. Commit + Push   (envoyer le projet sur GitHub)")
+        print("    2. Pull            (recuperer depuis GitHub)")
+        print("    3. Voir les modifications")
+        print("    4. Commit seulement (enregistrer sur ce PC)")
+        print("    5. Push seulement   (envoyer les commits deja faits)")
+        print("    6. Rendre le depot public / prive")
+        print("    7. " + ("Relier a un autre depot GitHub" if relie else "Relier a GitHub"))
+        print("    8. Ecraser GitHub avec ce dossier (force push)")
         print("    9. Supprimer le .git de ce dossier")
         print("    0. Retour")
         choix = ask("Choix", "0")
@@ -1471,7 +1553,7 @@ def menu_projet(cfg, chemin):
         if choix in ("0", "q"):
             return
         fn = actions.get(choix)
-        if not fn or (choix == "7" and MODE["nom"] != "perso"):
+        if not fn:
             warn("Choix invalide.")
             continue
         try:
@@ -1482,17 +1564,75 @@ def menu_projet(cfg, chemin):
         pause()
 
 
-def act_ouvrir_projet(cfg):
-    titre("Ouvrir un projet de cet ordinateur")
-    chemin = choisir_dossier(cfg)
-    if not chemin:
+def _recent(projet):
+    """Date du dernier travail git sur ce projet (pour trier la liste)."""
+    for f in ("index", "HEAD"):
+        try:
+            return os.path.getmtime(os.path.join(projet, ".git", f))
+        except OSError:
+            pass
+    return 0
+
+
+def projets_de_la_machine(cfg):
+    """Projets git trouves aux endroits habituels, les plus recents d'abord."""
+    maison = Path.home()
+    racines = [cfg.get("espace"), os.path.dirname(cfg.get("dernier_dossier") or "")]
+    racines += [str(maison / d) if d else str(maison) for d in EMPLACEMENTS]
+    vus, projets = set(), []
+    for r in racines:
+        if not r or not os.path.isdir(r):
+            continue
+        for p in trouver_projets(r):
+            cle = os.path.normcase(os.path.abspath(p))
+            if cle not in vus:
+                vus.add(cle)
+                projets.append(p)
+    return sorted(projets, key=_recent, reverse=True)
+
+
+def nom_court(chemin):
+    maison = str(Path.home())
+    if os.path.normcase(chemin).startswith(os.path.normcase(maison) + os.sep):
+        return "~" + chemin[len(maison):]
+    return chemin
+
+
+def act_envoyer_projet(cfg):
+    titre("Envoyer un projet de cet ordinateur sur GitHub")
+    info("Recherche des projets git de cet ordinateur...")
+    projets = projets_de_la_machine(cfg)[:30]
+    print()
+    if projets:
+        print(c(f"    {'#':>3}  {'Projet':<44} {'Modifs':>6}  GitHub", "90"))
+        for i, p in enumerate(projets, 1):
+            rm = remote_principal(p)
+            url = url_remote(rm, p) if rm else ""
+            lien = (cle_depot(url) or url[-30:]) if url else c("non relie", "90")
+            nom = nom_court(p)
+            nom = nom if len(nom) <= 44 else "~" + nom[-43:]
+            print(f"    {i:>3}. {nom:<44} {len(fichiers_modifies(p)):>6}  {lien}")
+    else:
+        info("Aucun projet git trouve aux emplacements habituels.")
+    print()
+    choix = ask("Numero d'un projet, ou chemin d'un autre dossier (Entree = retour)",
+                "", obligatoire=False)
+    if not choix:
         return
+    if choix.isdigit() and 1 <= int(choix) <= len(projets):
+        chemin = projets[int(choix) - 1]
+    else:
+        chemin = nettoyer_chemin(choix)
+        if not os.path.isdir(chemin):
+            err(f"Dossier introuvable : {chemin}")
+            pause()
+            return
     racine = racine_repo(chemin)
     if racine and os.path.normcase(racine) != os.path.normcase(chemin):
         info(f"Ce dossier fait partie du projet git : {racine}")
-        if not ask_yn("Ouvrir ce projet ?", True):
-            return
         chemin = racine
+    cfg["dernier_dossier"] = chemin
+    sauver(cfg)
     menu_projet(cfg, chemin)
 
 
@@ -1772,11 +1912,31 @@ def cloner(cfg, d):
     return dest
 
 
+def sensibles_sur_github(cfg, d):
+    """Fichiers secrets (.env, cles privees...) presents dans la branche principale."""
+    ref = urllib.parse.quote(d.get("default_branch") or "main")
+    code, rep, _ = api(cfg, "GET", f"/repos/{d['full_name']}/git/trees/{ref}?recursive=1")
+    if code != 200 or not isinstance(rep, dict):
+        return []
+    return [e["path"] for e in rep.get("tree", []) if e.get("type") == "blob"
+            and SENSIBLES.search(e["path"]) and not SENSIBLES_OK.search(e["path"])]
+
+
 def changer_visibilite(cfg, d):
     vers_prive = not d.get("private")
     if not vers_prive:
         warn("Rendre public expose tout le code ET tout l'historique des commits.")
-        if not ask_yn(f"Rendre {d['full_name']} PUBLIC ?", False):
+        sensibles = sensibles_sur_github(cfg, d)
+        if sensibles:
+            err("Ce depot contient des fichiers secrets, qui deviendraient publics :")
+            for f in sensibles[:20]:
+                print("       " + f)
+            info("Retire-les et change les secrets qu'ils contiennent avant de publier.")
+            if ask("Tape PUBLIC pour le rendre public quand meme", "",
+                   obligatoire=False) != "PUBLIC":
+                info("Annule.")
+                return
+        elif not ask_yn(f"Rendre {d['full_name']} PUBLIC ?", False):
             info("Annule.")
             return
     elif not ask_yn(f"Rendre {d['full_name']} PRIVE ?", True):
@@ -1828,16 +1988,20 @@ def act_compte(cfg):
         warn(f"Non connecte a {host(cfg)}.")
     print()
     print("    1. " + ("Se reconnecter / changer de compte" if user else "Se connecter (navigateur)"))
-    print("    2. Se deconnecter")
-    print("    3. Changer de serveur (GitHub Entreprise)")
+    print("    2. Se connecter avec un jeton d'acces (garde en memoire)")
+    print("    3. Se deconnecter")
+    print("    4. Changer de serveur (GitHub Entreprise)")
     print("    0. Retour")
     choix = ask("Choix", "0" if user else "1")
     if choix == "1":
         SESSION["token"] = ""
         connexion_navigateur(cfg)
     elif choix == "2":
-        deconnexion(cfg)
+        SESSION.update(token="", user=None, methode=None)
+        connexion_jeton(cfg)
     elif choix == "3":
+        deconnexion(cfg)
+    elif choix == "4":
         nouveau = ask("Serveur (github.com ou github.monentreprise.com)", host(cfg))
         cfg["host"] = re.sub(r"^https?://", "", nouveau).strip("/").lower()
         sauver(cfg)
@@ -1845,13 +2009,161 @@ def act_compte(cfg):
         connexion_navigateur(cfg)
 
 
-# Ordinateur entreprise : copie du projet vers le depot interne + push
+# Ordinateur entreprise : depot recupere depuis GitHub -> depot de l'entreprise
 
-def dossier_script():
-    try:
-        return str(Path(__file__).resolve().parent)
-    except NameError:
-        return os.getcwd()
+def verifier_url(url):
+    """Refuse les adresses non chiffrees (http://, git://) et retire tout
+    identifiant ecrit dans l'adresse."""
+    url = url.strip().strip('"').strip("'")
+    if re.match(r"^(http|git)://", url, re.I):
+        raise Arret("erreur", "adresse non chiffree refusee : utilise https:// ou SSH")
+    return sans_identifiants(url)
+
+
+def url_source(saisie):
+    """proprietaire/nom -> depot GitHub ; sinon URL https / SSH ou dossier local."""
+    s = saisie.strip().strip('"').strip("'")
+    local = nettoyer_chemin(s)
+    if os.path.isdir(local):
+        return local
+    if re.fullmatch(r"[\w.-]+/[\w.-]+", s):
+        return f"https://github.com/{s.removesuffix('.git')}.git"
+    return verifier_url(s)
+
+
+def acces_ok(cible, cwd=None, interactif=False):
+    """Le serveur accepte-t-il ces identifiants ? (git ls-remote, rien n'est modifie)"""
+    env = _env_git()
+    if not interactif:
+        env["GIT_TERMINAL_PROMPT"], env["GCM_INTERACTIVE"] = "0", "never"
+    code, _, e = git("ls-remote", "--heads", cible, cwd=cwd, quiet=True, env=env)
+    return code == 0, e
+
+
+def assurer_acces_entreprise(cible, cwd=None):
+    """Seconde authentification : compte du serveur de l'entreprise, distinct du
+    compte perso. Les identifiants deja presents sur ce PC sont essayes d'abord."""
+    acces, e = acces_ok(cible, cwd)
+    if acces:
+        ok("Acces au depot de l'entreprise verifie.")
+        return
+    url = url_remote(cible, cwd) if cwd else cible
+    if not (erreur_auth(e) or "not found" in e.lower()):
+        raise Arret("erreur", expliquer(e))
+    if est_ssh(url):
+        raise Arret("erreur", "cle SSH refusee : ajoute ta cle publique au compte de l'entreprise")
+    serveur = infos_url(url)[0] or "serveur"
+    methodes = ([("gcm", "Navigateur, avec Git Credential Manager")] if helper_gcm() else []) \
+        + ([("gh", "Navigateur, avec GitHub CLI")] if chemin_gh() else []) \
+        + [("jeton", "Jeton d'acces ou mot de passe (saisie masquee, garde en memoire)")]
+    while True:
+        print()
+        warn(f"Connexion au serveur de l'entreprise ({serveur}) : seconde authentification,")
+        info("distincte de ton compte perso.")
+        for i, (_, libelle) in enumerate(methodes, 1):
+            print(f"    {i}. {libelle}")
+        print("    0. Annuler")
+        choix = ask("Choix", "1")
+        if not (choix.isdigit() and 1 <= int(choix) <= len(methodes)):
+            raise Arret("ignore", "annule : rien n'a ete modifie")
+        methode = methodes[int(choix) - 1][0]
+        if methode == "gcm":
+            configurer_helper_gcm(serveur)
+            acces, e = acces_ok(cible, cwd, interactif=True)
+        elif methode == "gh":
+            subprocess.run([chemin_gh(), "auth", "login", "--web", "-h", serveur, "-p", "https"])
+            run([chemin_gh(), "auth", "setup-git", "-h", serveur])
+            acces, e = acces_ok(cible, cwd)
+        else:
+            MODE["utilisateur"], MODE["jeton"] = demander_secret(serveur, avec_utilisateur=True)
+            acces, e = acces_ok(cible, cwd)
+            if not acces:
+                MODE.update(utilisateur="", jeton="")
+        if acces:
+            ok("Connecte au serveur de l'entreprise.")
+            return
+        err("Acces refuse : " + expliquer(e))
+
+
+def cloner_depot_entreprise(cfg):
+    url = verifier_url(ask("URL du depot de l'entreprise (https://... ou git@...)",
+                           cfg.get("url_entreprise", "")))
+    cfg["url_entreprise"] = url
+    sauver(cfg)
+    assurer_acces_entreprise(url)
+    parent = nettoyer_chemin(ask("Cloner dans le dossier",
+                                 cfg.get("espace_entreprise") or str(Path.home())))
+    nom = infos_url(url)[2] or os.path.basename(url.rstrip("/\\")).removesuffix(".git")
+    dest = os.path.join(parent, nom)
+    if os.path.exists(os.path.join(dest, ".git")):
+        actuel = url_remote(remote_principal(dest) or "origin", dest)
+        if (cle_depot(actuel) or actuel) == (cle_depot(url) or url):
+            info(f"Deja clone dans {dest} : ce dossier est reutilise.")
+            return dest
+        raise Arret("erreur", f"{dest} contient deja un autre depot git")
+    if os.path.exists(dest) and (not os.path.isdir(dest) or os.listdir(dest)):
+        raise Arret("erreur", f"{dest} existe deja et n'est pas vide")
+    os.makedirs(parent, exist_ok=True)
+    if git_direct("clone", url, dest) != 0:
+        raise Arret("erreur", "clone impossible (adresse ou droits ?)")
+    cfg["espace_entreprise"] = parent
+    sauver(cfg)
+    ok(f"Depot de l'entreprise clone dans {dest}")
+    return dest
+
+
+def choisir_destination(cfg):
+    """Dossier git du depot de l'entreprise : deja present, ou clone maintenant."""
+    defaut = cfg.get("destination", "")
+    print()
+    print("    1. Le dossier git du depot de l'entreprise est deja sur ce PC")
+    print("    2. Le cloner depuis le serveur de l'entreprise")
+    choix = ask("Choix", "1" if defaut else "2")
+    if choix == "1":
+        dest = nettoyer_chemin(ask("Emplacement du dossier git de l'entreprise", defaut))
+    elif choix == "2":
+        dest = cloner_depot_entreprise(cfg)
+    else:
+        raise Arret("ignore", "annule")
+    racine = racine_repo(dest) if os.path.isdir(dest) else None
+    if racine is None:
+        raise Arret("erreur", f"aucun depot git dans {dest} : choisis 2 pour le cloner")
+    cfg["destination"] = dest
+    sauver(cfg)
+    return dest, racine
+
+
+def recuperer_source(url, dossier):
+    """Clone leger (dernier commit seulement) du depot a recuperer, sans aucun
+    identifiant. Retourne (dossier du projet, True si un jeton a servi)."""
+    cible = os.path.join(dossier, "projet")
+    args = ("clone", "--depth", "1", "--no-tags", "--quiet", url, cible)
+    info(f"Recuperation de {url_web(url) or url} (sans identifiants)...")
+    code, _, e = git(*args, quiet=True, env=_env_git(anonyme=True))
+    avec_jeton = False
+    if code != 0:
+        if est_ssh(url) or not (erreur_auth(e) or "not found" in e.lower()):
+            raise Arret("erreur", "recuperation impossible : " + expliquer(e))
+        warn("Ce depot n'est pas accessible sans identifiants : il est prive, ou son")
+        warn("nom est faux.")
+        print("    1. Me connecter a mon compte perso pour cette recuperation seulement")
+        print("       (jeton saisi masque, oublie juste apres)")
+        print("    0. Annuler (le depot peut etre rendu public depuis l'ordinateur perso)")
+        if ask("Choix", "0") != "1":
+            raise Arret("ignore", "annule : rien n'a ete modifie")
+        _, jeton = demander_secret(infos_url(url)[0] or "github.com")
+        if os.path.exists(cible):
+            supprimer_dossier(cible)
+        code, _, e = git(*args, quiet=True, env=_env_git(identite=("", jeton)))
+        jeton = None
+        if code != 0:
+            raise Arret("erreur", "recuperation impossible : " + expliquer(e))
+        avec_jeton = True
+    if not a_des_commits(cible):
+        raise Arret("erreur", "le depot recupere est vide")
+    _, dernier, _ = git("log", "-1", "--format=%h  %s", cwd=cible, quiet=True)
+    ok(f"Recupere : {cle_depot(url) or url}   (dernier commit {dernier})")
+    return cible, avec_jeton
 
 
 def _cle(rel):
@@ -1859,27 +2171,28 @@ def _cle(rel):
 
 
 def _exclu(rel):
-    morceaux = rel.split("/")
-    return any(m in EXCLUS_COPIE for m in morceaux) or \
-        _cle(rel) == _cle(NOM_SCRIPT)
+    return any(m in EXCLUS_COPIE for m in rel.split("/"))
 
 
 def lister_source(source):
     """{chemin relatif: chemin absolu} des fichiers a copier."""
-    try:
-        moi = os.path.normcase(str(Path(__file__).resolve()))
-    except NameError:
-        moi = ""
     fichiers = {}
     for racine, dossiers, noms in os.walk(source):
         dossiers[:] = sorted(d for d in dossiers if d not in EXCLUS_COPIE)
         for n in sorted(noms):
             p = os.path.join(racine, n)
             rel = os.path.relpath(p, source).replace(os.sep, "/")
-            if _exclu(rel) or os.path.normcase(os.path.abspath(p)) == moi:
-                continue
-            fichiers[rel] = p
+            if not _exclu(rel):
+                fichiers[rel] = p
     return fichiers
+
+
+def meme_contenu(a, b):
+    """Compare deux fichiers ; un lien symbolique est compare a sa cible ecrite,
+    jamais suivi (il pourrait pointer hors du projet)."""
+    if os.path.islink(a) or os.path.islink(b):
+        return os.path.islink(a) and os.path.islink(b) and os.readlink(a) == os.readlink(b)
+    return os.path.isfile(b) and filecmp.cmp(a, b, shallow=False)
 
 
 def plan_copie(source, dest):
@@ -1887,12 +2200,12 @@ def plan_copie(source, dest):
     nouveaux, modifies, identiques = [], [], 0
     for rel, p in src.items():
         d = os.path.join(dest, *rel.split("/"))
-        if not os.path.exists(d):
+        if not os.path.lexists(d):
             nouveaux.append(rel)
-        elif os.path.isdir(d) or not filecmp.cmp(p, d, shallow=False):
-            modifies.append(rel)
-        else:
+        elif meme_contenu(p, d):
             identiques += 1
+        else:
+            modifies.append(rel)
     # Fichiers suivis par git dans la destination mais absents du projet
     _, out, _ = git("ls-files", "-z", cwd=dest, quiet=True)
     cles_src = {_cle(r) for r in src}
@@ -1902,14 +2215,27 @@ def plan_copie(source, dest):
             "identiques": identiques, "en_trop": en_trop}
 
 
-def copier_fichier(src, dst):
+def dans_dossier(chemin, racine):
+    reel = os.path.normcase(os.path.realpath(chemin))
+    base = os.path.normcase(os.path.realpath(racine))
+    return reel == base or reel.startswith(base.rstrip(os.sep) + os.sep)
+
+
+def copier_fichier(src, dst, racine):
+    """Copie sans jamais ecrire hors du depot (lien symbolique piege)."""
     os.makedirs(os.path.dirname(dst), exist_ok=True)
-    if os.path.isfile(dst) and not os.access(dst, os.W_OK):
+    if not dans_dossier(os.path.dirname(dst), racine):
+        raise OSError("chemin hors du depot (lien symbolique)")
+    if os.path.islink(dst):
+        os.remove(dst)
+    elif os.path.isfile(dst) and not os.access(dst, os.W_OK):
         os.chmod(dst, stat.S_IWRITE | stat.S_IREAD)
-    shutil.copy2(src, dst)
+    shutil.copy2(src, dst, follow_symlinks=False)
 
 
 def supprimer_avec_dossiers_vides(fichier, limite):
+    if not dans_dossier(os.path.dirname(fichier), limite):
+        raise OSError("chemin hors du depot (lien symbolique)")
     os.remove(fichier)
     d = os.path.dirname(fichier)
     limite = os.path.normcase(os.path.abspath(limite))
@@ -1921,10 +2247,49 @@ def supprimer_avec_dossiers_vides(fichier, limite):
         d = os.path.dirname(d)
 
 
-def imbriques(a, b):
-    a, b = os.path.normcase(os.path.abspath(a)), os.path.normcase(os.path.abspath(b))
-    return a == b or a.startswith(b.rstrip(os.sep) + os.sep) or \
-        b.startswith(a.rstrip(os.sep) + os.sep)
+def remplacer_contenu(source, dest):
+    """Rend le dossier de l'entreprise identique au projet recupere (hors .git).
+    Retourne False si l'utilisateur annule."""
+    plan = plan_copie(source, dest)
+    a_copier, a_supprimer = plan["nouveaux"] + plan["modifies"], plan["en_trop"]
+    print()
+    info("Comparaison avec le depot de l'entreprise :")
+    print(f"       {plan['identiques']:>5} identique(s)")
+    print(f"       {len(plan['modifies']):>5} modifie(s)")
+    print(f"       {len(plan['nouveaux']):>5} nouveau(x)")
+    print(f"       {len(a_supprimer):>5} a supprimer (absents du projet recupere)")
+    if not a_copier and not a_supprimer:
+        info("Le depot de l'entreprise contient deja exactement ce projet.")
+        return True
+    print()
+    for libelle, liste in (("modifie ", plan["modifies"]), ("nouveau ", plan["nouveaux"]),
+                           ("supprime", a_supprimer)):
+        for rel in liste[:20]:
+            print(f"       {libelle}  {rel}")
+        if len(liste) > 20:
+            print(f"       ... et {len(liste) - 20} autre(s)")
+    print()
+    if not ask_yn(f"Remplacer le contenu du depot de l'entreprise ({len(a_copier)} "
+                  f"copie(s), {len(a_supprimer)} suppression(s)) ?", True):
+        return False
+    echecs = []
+    for rel in a_supprimer:  # d'abord : un ancien lien symbolique disparait avant la copie
+        try:
+            supprimer_avec_dossiers_vides(os.path.join(dest, *rel.split("/")), dest)
+        except OSError as e:
+            echecs.append(f"{rel} ({e.strerror or e})")
+    for rel in a_copier:
+        try:
+            copier_fichier(plan["src"][rel], os.path.join(dest, *rel.split("/")), dest)
+        except OSError as e:
+            echecs.append(f"{rel} ({e.strerror or e})")
+    if echecs:
+        warn(f"{len(echecs)} fichier(s) n'ont pas pu etre copies / supprimes :")
+        for x in echecs[:10]:
+            print("       " + x)
+    ok(f"Contenu remplace : {len(a_copier)} copie(s), {len(a_supprimer)} suppression(s)"
+       + (f", {len(echecs)} echec(s)." if echecs else "."))
+    return True
 
 
 def mettre_a_jour_destination(cfg, racine, remote, branche):
@@ -1951,118 +2316,37 @@ def mettre_a_jour_destination(cfg, racine, remote, branche):
         ok("Destination alignee sur la derniere version du serveur.")
 
 
-def act_copier_pousser(cfg):
-    titre("Copier le projet vers le depot de l'entreprise + push")
-    source = nettoyer_chemin(ask("Dossier du projet a copier",
-                                 cfg.get("source") or dossier_script()))
-    if not os.path.isdir(source):
-        raise Arret("erreur", f"dossier introuvable : {source}")
-    dest = nettoyer_chemin(ask("Dossier de destination (celui qui contient le .git)",
-                               cfg.get("destination", "")))
-    if not os.path.isdir(dest):
-        raise Arret("erreur", f"dossier introuvable : {dest}")
-    racine = racine_repo(dest)
-    if racine is None:
-        raise Arret("erreur", "aucun .git dans ce dossier : choisis le dossier clone "
-                              "depuis le depot de l'entreprise (git clone URL)")
-    if imbriques(source, dest):
-        raise Arret("erreur", "source et destination doivent etre deux dossiers separes")
-    cfg["source"], cfg["destination"] = source, dest
+def act_synchroniser(cfg):
+    titre("Synchroniser un depot sur l'ordinateur de l'entreprise")
+    info("Ton depot GitHub est recupere sans identifiants, puis envoye dans le")
+    info("depot de l'entreprise avec le compte de l'entreprise.")
+    print()
+    saisie = ask("Depot a recuperer (proprietaire/nom, URL ou dossier)",
+                 cfg.get("source_depot", ""))
+    url = url_source(saisie)
+    cfg["source_depot"] = saisie
     sauver(cfg)
-    if os.path.normcase(racine) != os.path.normcase(dest):
-        info(f"Depot git : {racine} (copie dans le sous-dossier "
-             f"{os.path.relpath(dest, racine)})")
-
+    dest, racine = choisir_destination(cfg)
     branche, remote = preparer(cfg, racine, auto=False)
-    info(f"Serveur : {url_web(url_remote(remote, racine)) or url_remote(remote, racine)}"
-         f"   branche {branche}")
+    assurer_acces_entreprise(remote, cwd=racine)
+    adresse = url_remote(remote, racine)
+    info(f"Depot de l'entreprise : {url_web(adresse) or adresse}   branche {branche}")
     mettre_a_jour_destination(cfg, racine, remote, branche)
-
-    plan = plan_copie(source, dest)
-    a_copier = plan["nouveaux"] + plan["modifies"]
-    print()
-    info(f"Comparaison  {source}  ->  {dest} :")
-    print(f"       {plan['identiques']:>5} identique(s)   (rien a faire)")
-    print(f"       {len(plan['modifies']):>5} modifie(s)")
-    print(f"       {len(plan['nouveaux']):>5} nouveau(x)")
-    print(f"       {len(plan['en_trop']):>5} present(s) seulement dans la destination")
-    info(f"Exclus de la copie : {NOM_SCRIPT}, " + ", ".join(sorted(EXCLUS_COPIE)))
-    if a_copier:
+    temp = tempfile.mkdtemp(prefix="gitmanager-")
+    try:
+        source, avec_jeton = recuperer_source(url, temp)
+        if not remplacer_contenu(source, dest):
+            return "ignore", "annule : le depot de l'entreprise n'a pas ete modifie"
         print()
-        info("Fichiers qui vont etre copies :")
-        for rel in plan["modifies"][:30]:
-            print(f"       modifie   {rel}")
-        for rel in plan["nouveaux"][:30]:
-            print(f"       nouveau   {rel}")
-        reste = max(0, len(plan["modifies"]) - 30) + max(0, len(plan["nouveaux"]) - 30)
-        if reste:
-            print(f"       ... et {reste} autre(s)")
-    a_supprimer = []
-    if plan["en_trop"]:
-        print()
-        warn("Ces fichiers sont dans le depot de l'entreprise mais plus dans ton projet :")
-        for rel in plan["en_trop"][:20]:
-            print("       " + rel)
-        if len(plan["en_trop"]) > 20:
-            print(f"       ... et {len(plan['en_trop']) - 20} autre(s)")
-        if ask_yn("Les supprimer de la destination (pour qu'elle soit identique) ?", False):
-            a_supprimer = plan["en_trop"]
-
-    if a_copier or a_supprimer:
-        print()
-        if not ask_yn(f"Copier {len(a_copier)} fichier(s)"
-                      + (f" et en supprimer {len(a_supprimer)}" if a_supprimer else "")
-                      + " dans la destination ?", True):
-            return "ignore", "annule, rien n'a ete copie"
-        echecs = []
-        for rel in a_copier:
-            try:
-                copier_fichier(plan["src"][rel], os.path.join(dest, *rel.split("/")))
-            except OSError as e:
-                echecs.append(f"{rel} ({e.strerror or e})")
-        for rel in a_supprimer:
-            try:
-                supprimer_avec_dossiers_vides(os.path.join(dest, *rel.split("/")), dest)
-            except OSError as e:
-                echecs.append(f"{rel} ({e.strerror or e})")
-        if echecs:
-            warn(f"{len(echecs)} fichier(s) n'ont pas pu etre copies / supprimes :")
-            for x in echecs[:10]:
-                print("       " + x)
-        ok(f"Copie terminee : {len(a_copier) - len(echecs)} fichier(s) copie(s)"
-           + (f", {len(a_supprimer)} supprime(s)" if a_supprimer else "") + ".")
-    else:
-        info("La destination contient deja exactement les fichiers de ton projet.")
-
-    print()
-    committer(cfg, racine)
-    return pousser(cfg, racine, remote, branche)
-
-
-def act_pousser_destination(cfg):
-    titre("Pousser le dossier de destination (sans copie)")
-    dest = nettoyer_chemin(ask("Dossier de destination (celui qui contient le .git)",
-                               cfg.get("destination", "")))
-    racine = racine_repo(dest) if os.path.isdir(dest) else None
-    if racine is None:
-        raise Arret("erreur", f"aucun depot git dans {dest}")
-    cfg["destination"] = dest
-    sauver(cfg)
-    return act_commit_push(cfg, racine)
-
-
-def act_etat_destination(cfg):
-    titre("Etat du depot de destination")
-    dest = nettoyer_chemin(ask("Dossier de destination", cfg.get("destination", "")))
-    racine = racine_repo(dest) if os.path.isdir(dest) else None
-    if racine is None:
-        raise Arret("erreur", f"aucun depot git dans {dest}")
-    remote = remote_principal(racine)
-    if remote and git("fetch", remote, cwd=racine, quiet=True)[0] != 0:
-        warn("Serveur injoignable : comparaison avec le serveur peut-etre ancienne.")
-    print()
-    entete_projet(racine)
-    voir_modifs(cfg, racine)
+        committer(cfg, racine, proposer_gitignore=False)
+        statut, detail = pousser(cfg, racine, remote, branche)
+    finally:
+        supprimer_dossier(temp)  # aucune copie du projet ne reste sur le disque
+        MODE.update(utilisateur="", jeton="")
+    if statut == "ok" and not avec_jeton and url.startswith("https://github.com/"):
+        info("Pense a repasser ton depot en prive depuis l'ordinateur perso, s'il")
+        info("n'a pas a rester public.")
+    return statut, detail
 
 
 # Menus
@@ -2079,21 +2363,19 @@ def lancer(fn, cfg, avec_pause=True):
         pause()
 
 
-def choisir_mode(cfg):
-    titre("GESTIONNAIRE GIT / GITHUB")
-    print("    Sur quel ordinateur es-tu ?")
+def choisir_fonction(cfg):
+    titre("GITMANAGER")
+    print("    Que veux-tu faire ?")
     print()
-    print("    1. Ordinateur perso       (GitHub : mes depots, commit, push, public / prive)")
-    print("    2. Ordinateur entreprise  (copier ce projet vers le depot interne + push)")
+    print("    1. Gerer et parcourir tes depots GitHub   (ordinateur perso)")
+    print("    2. Synchroniser un depot sur l'ordinateur de l'entreprise")
     print("    0. Quitter")
-    defaut = "2" if cfg.get("mode") == "entreprise" else "1"
-    choix = ask("Choix", defaut)
+    choix = ask("Choix", "2" if cfg.get("mode") == "entreprise" else "1")
     if choix not in ("1", "2"):
         return None
-    mode = "entreprise" if choix == "2" else "perso"
-    cfg["mode"] = mode
+    cfg["mode"] = "entreprise" if choix == "2" else "perso"
     sauver(cfg)
-    return mode
+    return cfg["mode"]
 
 
 def menu_perso(cfg):
@@ -2103,60 +2385,25 @@ def menu_perso(cfg):
         print()
         warn("Connexion annulee : menu 4 pour la relancer.")
     while True:
-        titre("ORDINATEUR PERSO  -  GitHub")
+        titre("GERER ET PARCOURIR TES DEPOTS GITHUB")
         if SESSION["user"]:
             print(c(f"  Connecte : {SESSION['user'].get('login')}  "
                     f"({NOMS_METHODES[SESSION['methode']]}, {host(cfg)})", "90"))
         else:
             print(c("  Non connecte a GitHub -> menu 4", "33"))
         print()
-        print("    1. Mes depots GitHub   (voir, parcourir, public / prive, cloner, supprimer)")
-        print("    2. Ouvrir un projet de ce PC   (init, commit, push, pull, supprimer .git)")
+        print("    1. Envoyer un projet de cet ordinateur   (projets trouves sur la machine)")
+        print("    2. Parcourir mes depots GitHub   (fichiers, commits, public / prive, cloner)")
         print("    3. Tout mettre a jour   (tous les projets d'un dossier)")
         print("    4. Compte GitHub   (connexion / deconnexion)")
-        print("    5. Passer en mode ordinateur entreprise")
-        print("    0. Quitter")
+        print("    0. Retour")
         choix = input(c("\n  Choix : ", "1;33")).strip()
         if choix in ("0", "q", "quit", "exit"):
-            return None
-        if choix == "5":
-            cfg["mode"] = "entreprise"
-            sauver(cfg)
-            return "entreprise"
-        if choix == "1":
-            lancer(act_depots, cfg, avec_pause=False)
-        elif choix == "2":
-            lancer(act_ouvrir_projet, cfg, avec_pause=False)
-        elif choix == "3":
-            lancer(act_tout, cfg)
-        elif choix == "4":
-            lancer(act_compte, cfg)
-        else:
-            warn("Choix invalide.")
-
-
-def menu_entreprise(cfg):
-    while True:
-        titre("ORDINATEUR ENTREPRISE  -  depot interne")
-        info(f"Projet a copier : {cfg.get('source') or dossier_script()}")
-        info(f"Destination     : {cfg.get('destination') or '(a choisir)'}")
-        print()
-        print("    1. Copier ce projet vers le depot de l'entreprise + commit + push")
-        print("    2. Pousser seulement (la destination contient deja les fichiers)")
-        print("    3. Etat du depot de destination")
-        print("    4. Passer en mode ordinateur perso")
-        print("    0. Quitter")
-        choix = input(c("\n  Choix : ", "1;33")).strip()
-        if choix in ("0", "q", "quit", "exit"):
-            return None
-        if choix == "4":
-            cfg["mode"] = "perso"
-            sauver(cfg)
-            return "perso"
-        fn = {"1": act_copier_pousser, "2": act_pousser_destination,
-              "3": act_etat_destination}.get(choix)
+            return
+        fn = {"1": act_envoyer_projet, "2": act_depots, "3": act_tout,
+              "4": act_compte}.get(choix)
         if fn:
-            lancer(fn, cfg)
+            lancer(fn, cfg, avec_pause=choix in ("3", "4"))
         else:
             warn("Choix invalide.")
 
@@ -2166,10 +2413,19 @@ def main():
         sys.exit(1)
     cfg = charger()
     migrer_ancienne_config(cfg)
-    mode = choisir_mode(cfg)
-    while mode:
-        MODE["nom"] = mode
-        mode = menu_perso(cfg) if mode == "perso" else menu_entreprise(cfg)
+    try:
+        while True:
+            mode = choisir_fonction(cfg)
+            if not mode:
+                break
+            MODE["nom"] = mode
+            if mode == "perso":
+                menu_perso(cfg)
+            else:
+                lancer(act_synchroniser, cfg)
+    finally:
+        SESSION.update(token="", user=None, methode=None)  # oubli des jetons
+        MODE.update(utilisateur="", jeton="")
     print("\n  A bientot.\n")
 
 
