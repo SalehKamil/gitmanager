@@ -32,15 +32,26 @@ dans la dernière version disponible, puis affiche l'empreinte SHA-256 de Git
 pour la vérifier. Il affiche ensuite le menu principal : taper 1 pour
 l'option 1, ou 2 pour l'option 2.
 
-### Option 1 : gérer et parcourir les dépôts GitHub (ordinateur perso)
+### Option 1 : gérer les dépôts (ordinateur perso)
 
-1. Envoyer un projet de cet ordinateur : choisir un projet trouvé sur la
-   machine, puis Commit + Push.
-2. Parcourir les dépôts GitHub : fichiers, historique, clone, public ou
-   privé, suppression.
-3. Tout mettre à jour : envoi de tous les projets d'un dossier en une fois.
-4. Compte GitHub : connexion par le navigateur ou par jeton d'accès,
-   déconnexion.
+La connexion au compte GitHub perso se fait toujours en premier, par le
+navigateur ou par jeton d'accès.
+
+1. Gérer les dépôts GitHub : la liste des dépôts en ligne.
+   - Parcourir les fichiers et voir les commits.
+   - Rendre public ou privé.
+   - Cloner sur l'ordinateur ou ouvrir dans le navigateur.
+   - Supprimer.
+2. Gérer les dépôts locaux : la liste des dépôts trouvés sur l'ordinateur.
+   - Envoyer : commit et push.
+   - Mettre à jour : pull.
+   - Écraser : force push, GitHub prend le contenu du dossier.
+   - Voir les modifications, commit seul, push seul, public ou privé,
+     relier à un autre dépôt, supprimer le `.git`.
+   - Tout mettre à jour : tous les dépôts d'un dossier en une fois.
+   - Envoyer un dossier : sans dépôt local, ou pour un nouveau projet ; le
+     programme demande le nom, la description et la visibilité du dépôt.
+3. Compte GitHub : connexion, déconnexion, changement de serveur.
 
 ### Option 2 : synchroniser un dépôt sur l'ordinateur de l'entreprise (ordinateur pro)
 

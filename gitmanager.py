@@ -4,17 +4,17 @@
 # dependencies = []
 # ///
 """
-gitmanager.py : Code chez toi, pousse au bureau, et gere tes depots GitHub
+gitmanager.py : coder a la maison, pousser au bureau, gerer les depots GitHub
 en local comme en ligne.
 
-Ton entreprise n'autorise pas le transfert de fichiers. Tu voudrais pourtant
-travailler sur tes projets depuis ton ordinateur perso, plus confortable, puis
-les envoyer sur ton ordinateur pro. Ou tu veux simplement gerer tes depots
-GitHub, sur ta machine comme en ligne. gitmanager sert a ca : il remplace les
-commandes Git par des menus.
+Quand l'entreprise n'autorise pas le transfert de fichiers, gitmanager permet
+de travailler sur ses projets depuis l'ordinateur perso, plus confortable,
+puis de les envoyer sur l'ordinateur pro. Il sert aussi a gerer les depots
+GitHub, en local comme en ligne. Il remplace les commandes Git par des menus.
 
-Au premier lancement, il installe ce qui manque (Git, GitHub CLI) dans sa
-derniere version et affiche l'empreinte SHA-256 de Git pour verification.
+Au premier lancement, il installe ce qui manque (Git, GitHub CLI) dans la
+derniere version disponible et affiche l'empreinte SHA-256 de Git pour
+verification.
 
 Lancement (avec uv) :
     uv run gitmanager.py
@@ -22,15 +22,17 @@ Lancement (avec uv) :
 Commande gitmanager sur n'importe quel poste (avec uv) :
     uv tool install https://github.com/SalehKamil/gitmanager/archive/refs/heads/main.zip
 
-Au demarrage : "Que veux-tu faire ?"
+Menu principal :
 
-  1. Gerer et parcourir tes depots GitHub (ordinateur perso)
-     - Envoyer un projet de cet ordinateur : le script propose les projets
-       git trouves sur la machine, puis commit, push, pull, public / prive.
-     - Parcourir tes depots GitHub : fichiers, commits, cloner, supprimer.
+  1. Gerer les depots (ordinateur perso, connexion au compte GitHub perso)
+     - Gerer les depots GitHub : fichiers, commits, public / prive, cloner,
+       supprimer.
+     - Gerer les depots locaux : envoyer (commit + push), mettre a jour
+       (pull), ecraser (force push), tout mettre a jour ; sans depot local,
+       envoi d'un dossier sur GitHub (nom, description, visibilite).
 
   2. Synchroniser un depot sur l'ordinateur de l'entreprise
-     Recupere ton depot GitHub (public, sans identifiants) dans un dossier
+     Recupere le depot GitHub (public, sans identifiants) dans un dossier
      temporaire, remplace le contenu du dossier git du depot de l'entreprise
      par ce projet, puis commit + push avec le compte de l'entreprise
      (seconde authentification, distincte du compte perso).
@@ -239,7 +241,7 @@ def migrer_ancienne_config(cfg):
                 pass
         warn("Ancien token supprime de ~/.gitmanager.json"
              + (" et de ~/.git-credentials." if nettoyes else "."))
-        info("Il n'est plus utilise. Tu peux le revoquer : https://github.com/settings/tokens")
+        info("Il n'est plus utilise. Le revoquer ici : https://github.com/settings/tokens")
     sauver(cfg)
     if os.environ.pop("GITHUB_TOKEN", None):
         warn("La variable GITHUB_TOKEN est ignoree (elle bloquerait la connexion navigateur).")
@@ -716,10 +718,10 @@ def installer_outil(outil, mise_a_jour=False):
             info("Les outils de developpement d'Apple contiennent Git (une fenetre s'ouvre).")
             if ask_yn("Les installer maintenant ?", True):
                 subprocess.run(["xcode-select", "--install"])
-                info("Relance le programme quand l'installation est terminee.")
+                info("Relancer le programme quand l'installation est terminee.")
             return False
-        info(f"Installe {nom} depuis " + ("https://git-scm.com/downloads" if outil == "git"
-                                         else "https://cli.github.com") + ", puis relance.")
+        info(f"Installer {nom} depuis " + ("https://git-scm.com/downloads" if outil == "git"
+                                          else "https://cli.github.com") + ", puis relancer.")
         return False
     verbe = "Mettre a jour" if mise_a_jour else "Installer"
     if not ask_yn(f"{verbe} {nom} (derniere version disponible) avec {g} ?", True):
@@ -737,12 +739,12 @@ def installer_outil(outil, mise_a_jour=False):
         if pret:
             afficher_empreinte_git(g)
     if not pret and os.name == "nt":
-        warn(f"{nom} est installe mais pas encore visible : ferme ce terminal, "
-             "rouvre-le et relance le programme.")
+        warn(f"{nom} est installe mais pas encore visible : fermer ce terminal, "
+             "le rouvrir et relancer le programme.")
     elif not pret:
         err(f"L'installation de {nom} avec {g} n'a pas abouti.")
-        info("Installe-le depuis " + ("https://git-scm.com/downloads" if outil == "git"
-                                      else "https://cli.github.com") + ", puis relance.")
+        info("L'installer depuis " + ("https://git-scm.com/downloads" if outil == "git"
+                                      else "https://cli.github.com") + ", puis relancer.")
     return pret
 
 
@@ -906,7 +908,7 @@ def configurer_identite(cfg, user):
         _, val, _ = git("config", "--global", "--get", cle, quiet=True)
         if val.strip():
             continue
-        valeur = identite_par_defaut(cfg, user, cle) or ask("Email pour tes commits")
+        valeur = identite_par_defaut(cfg, user, cle) or ask("Email pour les commits")
         git("config", "--global", cle, valeur, quiet=True)
         ok(f"git {cle} = {valeur}")
     _, branche, _ = git("config", "--global", "--get", "init.defaultBranch", quiet=True)
@@ -972,8 +974,8 @@ def connexion_navigateur(cfg):
     info(f"Connexion a {h} via {NOMS_METHODES[methode]}...")
     tok = ""
     if methode == "gh":
-        info("Copie le code a 8 caracteres affiche, appuie sur Entree,")
-        info("puis colle-le dans la page qui s'ouvre et clique 'Authorize'.")
+        info("Copier le code a 8 caracteres affiche, appuyer sur Entree,")
+        info("puis le coller dans la page qui s'ouvre et cliquer sur 'Authorize'.")
         print()
         p = subprocess.run([chemin_gh(), "auth", "login", "--web", "-h", h, "-p", "https"])
         if p.returncode != 0:
@@ -982,11 +984,11 @@ def connexion_navigateur(cfg):
         run([chemin_gh(), "auth", "setup-git", "-h", h])
         tok = token_silencieux(cfg, "gh")
     else:
-        info("Une fenetre GitHub va s'ouvrir : choisis 'Sign in with your browser'.")
+        info("Une fenetre GitHub va s'ouvrir : choisir 'Sign in with your browser'.")
         configurer_helper_gcm(h)
         tok = credential_gcm(cfg, interactif=True)
         code, _, _ = requete(cfg, "GET", "/user", token=tok) if tok else (0, None, None)
-        if code == 401:  # identifiants memorises mais revoques : on recommence
+        if code == 401:  # identifiants memorises mais revoques : nouvelle connexion
             oublier_gcm(cfg)
             tok = credential_gcm(cfg, interactif=True)
     code, user, _ = requete(cfg, "GET", "/user", token=tok) if tok else (0, {}, {})
@@ -1079,18 +1081,18 @@ def expliquer(sortie):
     if "repository not found" in s:
         return "depot introuvable sur le serveur (supprime, renomme ou pas les droits)"
     if "permission to" in s and "denied" in s:
-        return "ton compte n'a pas le droit d'ecrire dans ce depot"
+        return "ce compte n'a pas le droit d'ecrire dans ce depot"
     if erreur_auth(sortie):
-        return ("GitHub refuse l'acces : reconnecte-toi (menu Compte)" if perso else
-                "le serveur refuse l'acces : verifie que 'git push' marche dans ce dossier")
+        return ("GitHub refuse l'acces : se reconnecter (menu Compte GitHub)" if perso else
+                "le serveur refuse l'acces : verifier que 'git push' marche dans ce dossier")
     if "publickey" in s:
-        return "cle SSH refusee" + (" : relance pour passer le projet en HTTPS" if perso else "")
+        return "cle SSH refusee" + (" : relancer pour passer le projet en HTTPS" if perso else "")
     if "could not resolve host" in s or "timed out" in s or "failed to connect" in s:
-        return "serveur injoignable : verifie ta connexion (VPN / reseau de l'entreprise ?)"
+        return "serveur injoignable : verifier la connexion (VPN / reseau de l'entreprise ?)"
     if "gh001" in s or "file size limit" in s or "large files" in s:
         return "un fichier depasse 100 Mo (limite GitHub)"
     if "rejected" in s:
-        return "le serveur a des changements plus recents : relance l'envoi"
+        return "le serveur a des changements plus recents : relancer l'envoi"
     return derniere_ligne(sortie) or "erreur inconnue"
 
 
@@ -1138,8 +1140,8 @@ def assurer_identite(cfg, chemin, auto):
         if not valeur and auto:
             raise Arret("erreur", f"git {cle} n'est pas configure")
         if not valeur:
-            valeur = ask("Ton nom pour les commits" if cle == "user.name"
-                         else "Ton email pour les commits")
+            valeur = ask("Nom pour les commits" if cle == "user.name"
+                         else "Email pour les commits")
         git("config", "--global", cle, valeur, quiet=True)
         if not auto:
             ok(f"git {cle} = {valeur}")
@@ -1264,7 +1266,7 @@ def integrer(cfg, chemin, remote, branche, auto, pour_envoi=False):
             return branche, 0
         if defaut in branches_locales(chemin):
             raise Arret("erreur", f"une branche locale '{defaut}' existe deja : "
-                                  f"fais 'git switch {defaut}' puis recommence")
+                                  f"faire 'git switch {defaut}' puis recommencer")
         git("branch", "-M", defaut, cwd=chemin)
         branche = defaut
 
@@ -1315,12 +1317,12 @@ def integrer(cfg, chemin, remote, branche, auto, pour_envoi=False):
             print("       " + f)
         if pour_envoi:
             info("Astuce : l'option 2 'ce dossier fait foi' evite ce conflit.")
-        if not ask_yn("Annuler (rien n'est perdu, tes commits restent ici) ?", True):
-            info("Ouvre ces fichiers, garde la bonne version entre <<<<<<< et >>>>>>>,")
+        if not ask_yn("Annuler (rien n'est perdu, les commits restent ici) ?", True):
+            info("Ouvrir ces fichiers, garder la bonne version entre <<<<<<< et >>>>>>>,")
             info("puis : git add .   et   git rebase --continue")
             raise Arret("conflit", f"conflit en cours de resolution : {liste}")
     git("rebase", "--abort", cwd=chemin, quiet=True)
-    raise Arret("conflit", f"conflit sur {liste} : rien envoye, ton travail est intact")
+    raise Arret("conflit", f"conflit sur {liste} : rien envoye, le travail local est intact")
 
 
 def pousser(cfg, chemin, remote, branche, auto=False):
@@ -1389,11 +1391,11 @@ def preparer(cfg, chemin, auto, lier=True):
             raise Arret("ignore", f"{op} en cours (conflit a terminer a la main)")
         warn(f"Une operation '{op}' est restee en cours (conflit non termine).")
         if not ask_yn("L'annuler pour revenir a l'etat d'avant ?", True):
-            raise Arret("conflit", f"termine-la : git add .  puis  git {op} --continue")
+            raise Arret("conflit", f"pour la terminer : git add .  puis  git {op} --continue")
         git(op, "--abort", cwd=chemin)
     branche = branche_courante(chemin)
     if not branche:
-        raise Arret("erreur", "HEAD detachee : place-toi sur une branche (git switch main)")
+        raise Arret("erreur", "HEAD detachee : se placer sur une branche (git switch main)")
     remote = remote_principal(chemin)
     if not remote:
         if auto or not lier:
@@ -1527,10 +1529,11 @@ def lier_a_github(cfg, chemin):
             url = f"https://{host(cfg)}/{cible.removesuffix('.git')}.git"
     else:
         defaut = re.sub(r"[^A-Za-z0-9._-]+", "-", os.path.basename(chemin)).strip("-")
-        nom = ask("Nom du depot", defaut or "mon-projet")
-        org = ask("Organisation (vide = ton compte)", "", obligatoire=False)
+        nom = ask("Nom du depot", defaut or "projet")
+        description = ask("Description du depot (facultatif)", "", obligatoire=False)
+        org = ask("Organisation (vide = compte personnel)", "", obligatoire=False)
         prive = ask_yn("Depot prive ?", True)
-        url = creer_depot(cfg, nom, prive, org)
+        url = creer_depot(cfg, nom, prive, org, description)
         if not url:
             return None
     if "origin" in remotes(chemin):
@@ -1540,9 +1543,12 @@ def lier_a_github(cfg, chemin):
     return "origin"
 
 
-def creer_depot(cfg, nom, prive, org=""):
+def creer_depot(cfg, nom, prive, org="", description=""):
     chemin = f"/orgs/{org}/repos" if org else "/user/repos"
-    code, rep, _ = api(cfg, "POST", chemin, {"name": nom, "private": prive})
+    donnees = {"name": nom, "private": prive}
+    if description:
+        donnees["description"] = description
+    code, rep, _ = api(cfg, "POST", chemin, donnees)
     if code == 201:
         ok(f"Depot cree : {rep.get('html_url')} ({'prive' if prive else 'public'})")
         return rep.get("clone_url")
@@ -1563,7 +1569,7 @@ def depot_du_projet(cfg, chemin):
     remote = remote_principal(chemin)
     h, o, r = infos_url(url_remote(remote, chemin)) if remote else (None, None, None)
     if not o or h != host(cfg):
-        err("Ce projet n'est pas relie a un depot de ton compte GitHub.")
+        err("Ce projet n'est pas relie a un depot du compte GitHub connecte.")
         return None
     code, rep, _ = api(cfg, "GET", f"/repos/{o}/{r}")
     if code != 200:
@@ -1627,7 +1633,7 @@ def voir_modifs(cfg, chemin):
 def act_commit(cfg, chemin):
     n = committer(cfg, chemin)
     if n:
-        return "ok", f"commit enregistre sur ce PC ({n} fichier(s)) : fais Push pour l'envoyer"
+        return "ok", f"commit enregistre sur cet ordinateur ({n} fichier(s)) : faire Push pour l'envoyer"
     return "a_jour", "rien a committer"
 
 
@@ -1653,7 +1659,7 @@ def act_pull(cfg, chemin):
 
 def act_ecraser(cfg, chemin):
     warn("Remplace TOUT l'historique du serveur par celui de ce dossier. Irreversible.")
-    info("Pour garder l'historique, prefere Push puis 'ce dossier fait foi'.")
+    info("Pour garder l'historique, preferer Envoyer puis 'ce dossier fait foi'.")
     branche, remote = preparer(cfg, chemin, auto=False)
     recuperer(cfg, chemin, remote, auto=False)
     if ref_existe(chemin, f"refs/remotes/{remote}/{branche}"):
@@ -1665,7 +1671,7 @@ def act_ecraser(cfg, chemin):
                 print("       " + l)
     print()
     warn(f"Cible : {url_web(url_remote(remote, chemin)) or remote}  branche {branche}")
-    if ask("Tape ECRASER en majuscules pour confirmer", "", obligatoire=False) != "ECRASER":
+    if ask("Taper ECRASER en majuscules pour confirmer", "", obligatoire=False) != "ECRASER":
         return "ignore", "annule"
     committer(cfg, chemin)
     if not a_des_commits(chemin):
@@ -1692,16 +1698,16 @@ def act_relier(cfg, chemin):
 def act_supprimer_git(cfg, chemin):
     """Supprime le dossier .git (le code reste). Retourne True si fait."""
     dot_git = os.path.join(chemin, ".git")
-    warn("Supprime l'historique git LOCAL (.git). Tes fichiers de code ne sont pas touches.")
+    warn("Suppression de l'historique git LOCAL (.git). Les fichiers de code ne sont pas touches.")
     info("Le dossier ne sera plus relie a GitHub. Ce qui a deja ete envoye reste sur GitHub.")
     modifs = fichiers_modifies(chemin)
     remote, branche = remote_principal(chemin), branche_courante(chemin)
     ar = avance_retard(chemin, remote, branche) if remote and branche else None
     if modifs or (ar and ar[0]) or (remote and branche and ar is None and a_des_commits(chemin)):
-        warn("Attention : une partie de ton travail n'est PAS sur GitHub "
+        warn("Attention : une partie du travail n'est PAS sur GitHub "
              f"({len(modifs)} fichier(s) non commite(s), "
              f"{ar[0] if ar else 'des'} commit(s) non envoye(s)).")
-    if ask("Tape SUPPRIMER en majuscules pour confirmer", "", obligatoire=False) != "SUPPRIMER":
+    if ask("Taper SUPPRIMER en majuscules pour confirmer", "", obligatoire=False) != "SUPPRIMER":
         info("Annule.")
         return False
     if os.path.isdir(dot_git):
@@ -1709,7 +1715,7 @@ def act_supprimer_git(cfg, chemin):
     elif os.path.isfile(dot_git):
         os.remove(dot_git)
     if os.path.exists(dot_git):
-        err("Suppression incomplete : ferme les programmes qui utilisent ce dossier et reessaie.")
+        err("Suppression incomplete : fermer les programmes qui utilisent ce dossier et reessayer.")
         return False
     ok(f".git supprime : {chemin} est maintenant un simple dossier.")
     return True
@@ -1746,22 +1752,22 @@ def menu_projet(cfg, chemin):
     if remote and git("fetch", remote, cwd=chemin, quiet=True)[0] != 0:
         warn("Serveur injoignable : l'etat 'a envoyer / a recuperer' peut etre ancien.")
     actions = {
-        "1": act_commit_push, "2": act_pull, "3": voir_modifs, "4": act_commit,
-        "5": act_push, "6": act_visibilite_projet, "7": act_relier, "8": act_ecraser,
+        "1": act_commit_push, "2": act_pull, "3": act_ecraser, "4": voir_modifs,
+        "5": act_commit, "6": act_push, "7": act_visibilite_projet, "8": act_relier,
     }
     while True:
-        titre("Projet local")
+        titre("Depot local")
         entete_projet(chemin)
         relie = bool(remote_principal(chemin))
         print()
-        print("    1. Commit + Push   (envoyer le projet sur GitHub)")
-        print("    2. Pull            (recuperer depuis GitHub)")
-        print("    3. Voir les modifications")
-        print("    4. Commit seulement (enregistrer sur ce PC)")
-        print("    5. Push seulement   (envoyer les commits deja faits)")
-        print("    6. Rendre le depot public / prive")
-        print("    7. " + ("Relier a un autre depot GitHub" if relie else "Relier a GitHub"))
-        print("    8. Ecraser GitHub avec ce dossier (force push)")
+        print("    1. Envoyer          (commit + push sur GitHub)")
+        print("    2. Mettre a jour    (pull depuis GitHub)")
+        print("    3. Ecraser GitHub avec ce dossier (force push)")
+        print("    4. Voir les modifications")
+        print("    5. Commit seulement (enregistrer sur cet ordinateur)")
+        print("    6. Push seulement   (envoyer les commits deja faits)")
+        print("    7. Rendre le depot public / prive")
+        print("    8. " + ("Relier a un autre depot GitHub" if relie else "Relier a GitHub"))
         print("    9. Supprimer le .git de ce dossier")
         print("    0. Retour")
         choix = ask("Choix", "0")
@@ -1819,46 +1825,59 @@ def nom_court(chemin):
     return chemin
 
 
-def act_envoyer_projet(cfg):
-    titre("Envoyer un projet de cet ordinateur sur GitHub")
-    info("Recherche des projets git de cet ordinateur...")
-    projets = projets_de_la_machine(cfg)[:30]
-    print()
-    if projets:
-        print(c(f"    {'#':>3}  {'Projet':<44} {'Modifs':>6}  GitHub", "90"))
-        for i, (p, (url, modifs, _)) in enumerate(zip(projets, apercu_projets(projets)), 1):
-            nom = nom_court(p)
-            nom = nom if len(nom) <= 44 else "~" + nom[-43:]
-            print(f"    {i:>3}. {nom:<44} {modifs:>6}  {lien_court(url)}")
-    else:
-        info("Aucun projet git trouve aux emplacements habituels.")
-    print()
-    choix = ask("Numero d'un projet, ou chemin d'un autre dossier (Entree = retour)",
-                "", obligatoire=False)
-    if not choix:
-        return
-    if choix.isdigit() and 1 <= int(choix) <= len(projets):
-        chemin = projets[int(choix) - 1]
-    else:
-        chemin = nettoyer_chemin(choix)
-        if not os.path.isdir(chemin):
-            err(f"Dossier introuvable : {chemin}")
-            pause()
-            return
+def ouvrir_dossier(cfg, chemin):
+    """Ouvre le menu d'un depot ; un dossier sans git propose de l'envoyer sur GitHub."""
     racine = racine_repo(chemin)
     if racine and os.path.normcase(racine) != os.path.normcase(chemin):
-        info(f"Ce dossier fait partie du projet git : {racine}")
+        info(f"Ce dossier fait partie du depot git : {racine}")
         chemin = racine
     cfg["dernier_dossier"] = chemin
     sauver(cfg)
     menu_projet(cfg, chemin)
 
 
+def act_autre_dossier(cfg):
+    titre("Envoyer un dossier sur GitHub")
+    chemin = choisir_dossier(cfg, "Dossier a envoyer (ou depot non liste)")
+    if chemin:
+        ouvrir_dossier(cfg, chemin)
+
+
+def act_depots_locaux(cfg):
+    titre("Gerer les depots locaux")
+    info("Recherche des depots git de cet ordinateur...")
+    projets = projets_de_la_machine(cfg)[:30]
+    print()
+    if not projets:
+        info("Aucun depot git trouve sur cet ordinateur.")
+        if ask_yn("Envoyer un dossier sur GitHub ?", True):
+            act_autre_dossier(cfg)
+        return
+    print(c(f"    {'#':>3}  {'Depot':<44} {'Modifs':>6}  GitHub", "90"))
+    for i, (p, (url, modifs, _)) in enumerate(zip(projets, apercu_projets(projets)), 1):
+        nom = nom_court(p)
+        nom = nom if len(nom) <= 44 else "~" + nom[-43:]
+        print(f"    {i:>3}. {nom:<44} {modifs:>6}  {lien_court(url)}")
+    print()
+    print("      N. Envoyer un autre dossier sur GitHub (nouveau ou non liste)")
+    print("      T. Tout mettre a jour   (tous les depots d'un dossier)")
+    choix = ask("Numero d'un depot, N ou T (Entree = retour)", "", obligatoire=False).lower()
+    if choix.isdigit() and 1 <= int(choix) <= len(projets):
+        ouvrir_dossier(cfg, projets[int(choix) - 1])
+    elif choix == "n":
+        act_autre_dossier(cfg)
+    elif choix == "t":
+        executer(act_tout, cfg)
+        pause()
+    elif choix:
+        warn("Choix invalide.")
+
+
 def act_tout(cfg):
     titre("Tout mettre a jour")
     defaut = cfg.get("espace") or os.path.dirname(cfg.get("dernier_dossier") or "") or os.getcwd()
     cfg.setdefault("espace", defaut)
-    dossier = choisir_dossier(cfg, "Dossier qui contient tes projets", "espace")
+    dossier = choisir_dossier(cfg, "Dossier qui contient les projets", "espace")
     if not dossier:
         return
     projets = trouver_projets(dossier)
@@ -1895,13 +1914,13 @@ def act_tout(cfg):
               "ignore": "ignore(s)", "erreur": "en erreur"}
     info("Bilan : " + ", ".join(f"{n} {resume[s]}" for s, n in bilan.items()))
     if bilan.get("conflit"):
-        info("Projets en conflit : ouvre-les (menu 2) et utilise Push pour choisir.")
+        info("Projets en conflit : les ouvrir (Gerer les depots locaux) et utiliser Envoyer.")
 
 
 # Depots GitHub : liste, navigation, visibilite, suppression
 
 def act_depots(cfg):
-    titre("Mes depots GitHub")
+    titre("Depots GitHub")
     if not assurer_connexion(cfg):
         return
     info("Chargement de la liste...")
@@ -2118,7 +2137,7 @@ def cloner(cfg, d):
         return None
     os.makedirs(parent, exist_ok=True)
     if git_direct("clone", d["clone_url"], dest) != 0:
-        err("Clone echoue (connexion ? droits ?). Reessaie apres le menu Compte.")
+        err("Clone echoue (connexion ? droits ?). Reessayer apres le menu Compte GitHub.")
         return None
     cfg["dernier_dossier"] = dest
     sauver(cfg)
@@ -2145,8 +2164,8 @@ def changer_visibilite(cfg, d):
             err("Ce depot contient des fichiers secrets, qui deviendraient publics :")
             for f in sensibles[:20]:
                 print("       " + f)
-            info("Retire-les et change les secrets qu'ils contiennent avant de publier.")
-            if ask("Tape PUBLIC pour le rendre public quand meme", "",
+            info("Les retirer et changer les secrets qu'ils contiennent avant de publier.")
+            if ask("Taper PUBLIC pour le rendre public quand meme", "",
                    obligatoire=False) != "PUBLIC":
                 info("Annule.")
                 return
@@ -2166,14 +2185,14 @@ def changer_visibilite(cfg, d):
 
 def supprimer_depot(cfg, d):
     warn("Suppression DEFINITIVE sur GitHub (code, issues, historique).")
-    info("Les copies sur ton ordinateur ne sont pas touchees.")
-    if ask(f"Retape '{d['name']}' pour confirmer", "", obligatoire=False) != d["name"]:
+    info("Les copies sur cet ordinateur ne sont pas touchees.")
+    if ask(f"Taper '{d['name']}' pour confirmer", "", obligatoire=False) != d["name"]:
         info("Annule.")
         return False
     code, rep, _ = api(cfg, "DELETE", f"/repos/{d['full_name']}")
     if code == 403 and SESSION["methode"] == "gh":
         info("GitHub demande une autorisation de plus pour supprimer (delete_repo).")
-        info("Ton navigateur va s'ouvrir une derniere fois pour l'accorder.")
+        info("Le navigateur va s'ouvrir une derniere fois pour l'accorder.")
         p = subprocess.run([chemin_gh(), "auth", "refresh", "-h", host(cfg),
                             "-s", "delete_repo"])
         if p.returncode == 0:
@@ -2183,7 +2202,7 @@ def supprimer_depot(cfg, d):
         ok(f"{d['full_name']} supprime.")
         return True
     if code == 403:
-        warn("Ta connexion n'a pas le droit de supprimer des depots.")
+        warn("Cette connexion n'a pas le droit de supprimer des depots.")
         info("La page des parametres s'ouvre : tout en bas, 'Delete this repository'.")
         webbrowser.open(d["html_url"] + "/settings")
         return False
@@ -2230,7 +2249,7 @@ def verifier_url(url):
     identifiant ecrit dans l'adresse."""
     url = url.strip().strip('"').strip("'")
     if re.match(r"^(http|git)://", url, re.I):
-        raise Arret("erreur", "adresse non chiffree refusee : utilise https:// ou SSH")
+        raise Arret("erreur", "adresse non chiffree refusee : utiliser https:// ou SSH")
     return sans_identifiants(url)
 
 
@@ -2265,7 +2284,7 @@ def assurer_acces_entreprise(cible, cwd=None):
     if not (erreur_auth(e) or "not found" in e.lower()):
         raise Arret("erreur", expliquer(e))
     if est_ssh(url):
-        raise Arret("erreur", "cle SSH refusee : ajoute ta cle publique au compte de l'entreprise")
+        raise Arret("erreur", "cle SSH refusee : ajouter la cle publique au compte de l'entreprise")
     serveur = infos_url(url)[0] or "serveur"
     methodes = ([("gcm", "Navigateur, avec Git Credential Manager")] if helper_gcm() else []) \
         + ([("gh", "Navigateur, avec GitHub CLI")] if chemin_gh() else []) \
@@ -2273,7 +2292,7 @@ def assurer_acces_entreprise(cible, cwd=None):
     while True:
         print()
         warn(f"Connexion au serveur de l'entreprise ({serveur}) : seconde authentification,")
-        info("distincte de ton compte perso.")
+        info("distincte du compte perso.")
         for i, (_, libelle) in enumerate(methodes, 1):
             print(f"    {i}. {libelle}")
         print("    0. Annuler")
@@ -2341,7 +2360,7 @@ def choisir_destination(cfg):
         raise Arret("ignore", "annule")
     racine = racine_repo(dest) if os.path.isdir(dest) else None
     if racine is None:
-        raise Arret("erreur", f"aucun depot git dans {dest} : choisis 2 pour le cloner")
+        raise Arret("erreur", f"aucun depot git dans {dest} : choisir 2 pour le cloner")
     cfg["destination"] = dest
     sauver(cfg)
     return dest, racine
@@ -2360,7 +2379,7 @@ def recuperer_source(url, dossier):
             raise Arret("erreur", "recuperation impossible : " + expliquer(e))
         warn("Ce depot n'est pas accessible sans identifiants : il est prive, ou son")
         warn("nom est faux.")
-        print("    1. Me connecter a mon compte perso pour cette recuperation seulement")
+        print("    1. Se connecter au compte perso pour cette recuperation seulement")
         print("       (jeton saisi masque, oublie juste apres)")
         print("    0. Annuler (le depot peut etre rendu public depuis l'ordinateur perso)")
         if ask("Choix", "0") != "1":
@@ -2532,7 +2551,7 @@ def mettre_a_jour_destination(cfg, racine, remote, branche):
 
 def act_synchroniser(cfg):
     titre("Synchroniser un depot sur l'ordinateur de l'entreprise")
-    info("Ton depot GitHub est recupere sans identifiants, puis envoye dans le")
+    info("Le depot GitHub est recupere sans identifiants, puis envoye dans le")
     info("depot de l'entreprise avec le compte de l'entreprise.")
     print()
     saisie = ask("Depot a recuperer (proprietaire/nom, URL ou dossier)",
@@ -2558,7 +2577,7 @@ def act_synchroniser(cfg):
         supprimer_dossier(temp)  # aucune copie du projet ne reste sur le disque
         MODE.update(utilisateur="", jeton="")
     if statut == "ok" and not avec_jeton and url.startswith("https://github.com/"):
-        info("Pense a repasser ton depot en prive depuis l'ordinateur perso, s'il")
+        info("Penser a repasser le depot en prive depuis l'ordinateur perso, s'il")
         info("n'a pas a rester public.")
     return statut, detail
 
@@ -2579,12 +2598,12 @@ def lancer(fn, cfg, avec_pause=True):
 
 def choisir_fonction(cfg):
     titre("gitmanager")
-    print(c("    Code chez toi, pousse au bureau, et gere tes depots GitHub", "36"))
+    print(c("    Coder a la maison, pousser au bureau, gerer les depots GitHub", "36"))
     print(c("    en local comme en ligne.", "36"))
     print()
-    print("    Que veux-tu faire ?")
+    print("    Choisir une option :")
     print()
-    print("    1. Gerer et parcourir tes depots GitHub   (ordinateur perso)")
+    print("    1. Gerer les depots   (ordinateur perso : depots GitHub et depots locaux)")
     print("    2. Synchroniser un depot sur l'ordinateur de l'entreprise")
     print("    0. Quitter")
     choix = ask("Choix", "2" if cfg.get("mode") == "entreprise" else "1")
@@ -2595,39 +2614,44 @@ def choisir_fonction(cfg):
     return cfg["mode"]
 
 
+def connexion_obligatoire(cfg):
+    """Option 1 : la connexion au compte GitHub perso passe toujours en premier."""
+    while not SESSION["user"]:
+        try:
+            if assurer_connexion(cfg):
+                return True
+        except KeyboardInterrupt:
+            print()
+        if not ask_yn("Pas de connexion au compte GitHub. Reessayer ?", True):
+            return False
+    return True
+
+
 def menu_perso(cfg):
-    try:
-        assurer_connexion(cfg)  # ouvre le navigateur seulement si necessaire
-    except KeyboardInterrupt:
+    while connexion_obligatoire(cfg):
+        titre("OPTION 1 : GERER LES DEPOTS")
+        print(c(f"  Compte GitHub : {SESSION['user'].get('login')}  "
+                f"({NOMS_METHODES[SESSION['methode']]}, {host(cfg)})", "90"))
         print()
-        warn("Connexion annulee : menu 4 pour la relancer.")
-    while True:
-        titre("GERER ET PARCOURIR TES DEPOTS GITHUB")
-        if SESSION["user"]:
-            print(c(f"  Connecte : {SESSION['user'].get('login')}  "
-                    f"({NOMS_METHODES[SESSION['methode']]}, {host(cfg)})", "90"))
-        else:
-            print(c("  Non connecte a GitHub -> menu 4", "33"))
-        print()
-        print("    1. Envoyer un projet de cet ordinateur   (projets trouves sur la machine)")
-        print("    2. Parcourir mes depots GitHub   (fichiers, commits, public / prive, cloner)")
-        print("    3. Tout mettre a jour   (tous les projets d'un dossier)")
-        print("    4. Compte GitHub   (connexion / deconnexion)")
+        print("    1. Gerer les depots GitHub   (en ligne : fichiers, commits, public / prive,")
+        print("                                  cloner, supprimer)")
+        print("    2. Gerer les depots locaux   (sur cet ordinateur : envoyer, mettre a jour,")
+        print("                                  ecraser, tout mettre a jour)")
+        print("    3. Compte GitHub   (connexion, deconnexion, serveur)")
         print("    0. Retour")
         choix = input(c("\n  Choix : ", "1;33")).strip()
         if choix in ("0", "q", "quit", "exit"):
             return
-        fn = {"1": act_envoyer_projet, "2": act_depots, "3": act_tout,
-              "4": act_compte}.get(choix)
+        fn = {"1": act_depots, "2": act_depots_locaux, "3": act_compte}.get(choix)
         if fn:
-            lancer(fn, cfg, avec_pause=choix in ("3", "4"))
+            lancer(fn, cfg, avec_pause=choix == "3")
         else:
             warn("Choix invalide.")
 
 
 def main():
     if sys.version_info < (3, 9):
-        print("gitmanager demande Python 3.9 ou plus : lance-le avec "
+        print("gitmanager demande Python 3.9 ou plus : le lancer avec "
               "uv run gitmanager.py")
         sys.exit(1)
     cfg = charger()
