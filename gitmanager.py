@@ -20,7 +20,7 @@ Lancement (avec uv) :
     uv run gitmanager.py
 
 Commande gitmanager sur n'importe quel poste (avec uv) :
-    uv tool install https://github.com/SalehKamil/GITManager/archive/refs/heads/main.zip
+    uv tool install https://github.com/SalehKamil/gitmanager/archive/refs/heads/main.zip
 
 Au demarrage : "Que veux-tu faire ?"
 

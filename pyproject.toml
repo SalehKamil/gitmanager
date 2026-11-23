@@ -11,7 +11,7 @@ dependencies = []
 gitmanager = "gitmanager:point_entree"
 
 [project.urls]
-Source = "https://github.com/SalehKamil/GITManager"
+Source = "https://github.com/SalehKamil/gitmanager"
 
 [build-system]
 requires = ["setuptools>=61"]

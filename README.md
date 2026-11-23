@@ -21,7 +21,7 @@ uv run gitmanager.py
 Pour le retrouver sur n'importe quel poste, l'installer comme commande :
 
 ```bash
-uv tool install https://github.com/SalehKamil/GITManager/archive/refs/heads/main.zip
+uv tool install https://github.com/SalehKamil/gitmanager/archive/refs/heads/main.zip
 ```
 
 Il se lance ensuite en tapant `gitmanager`, depuis n'importe quel dossier. La
