@@ -12,37 +12,25 @@ un numéro suffit pour lancer les bonnes commandes.
 
 ## Comment l'utiliser
 
-Rien n'est à installer avant : le programme installe lui-même ce qui manque.
+Le programme se lance avec uv, qui fournit Python :
 
-1. Récupérer le projet : sur cette page, cliquer sur Code, puis sur Download
-   ZIP, et décompresser le fichier.
-2. Lancer le programme : sous Windows, double-cliquer sur `gitmanager.cmd`.
-   Sous macOS ou Linux, taper dans un terminal ouvert dans le dossier :
+```bash
+uv run gitmanager.py
+```
 
-   ```bash
-   sh gitmanager.sh
-   ```
-
-Sur un poste où uv est installé, GITManager s'installe aussi comme une
-commande, disponible depuis n'importe quel dossier, sous Windows, macOS et
-Linux :
+Pour le retrouver sur n'importe quel poste, l'installer comme commande :
 
 ```bash
 uv tool install https://github.com/SalehKamil/GITManager/archive/refs/heads/main.zip
 ```
 
-Il se lance ensuite en tapant `gitmanager`. Si la commande reste
-introuvable, lancer `uv tool update-shell` puis rouvrir le terminal. La mise
-à jour reprend la même installation :
+Il se lance ensuite en tapant `gitmanager`, depuis n'importe quel dossier. La
+même installation avec `--reinstall` le met à jour.
 
-```bash
-uv tool install --reinstall https://github.com/SalehKamil/GITManager/archive/refs/heads/main.zip
-```
-
-Au premier lancement, le programme installe ce qui manque (Python, Git,
-GitHub CLI) dans la dernière version disponible, puis affiche l'empreinte
-SHA-256 de Git pour la vérifier. Il affiche ensuite le menu principal : taper
-1 pour l'option 1, ou 2 pour l'option 2.
+Au premier lancement, le programme installe Git et GitHub CLI s'ils manquent,
+dans la dernière version disponible, puis affiche l'empreinte SHA-256 de Git
+pour la vérifier. Il affiche ensuite le menu principal : taper 1 pour
+l'option 1, ou 2 pour l'option 2.
 
 ### Option 1 : gérer et parcourir les dépôts GitHub (ordinateur perso)
 

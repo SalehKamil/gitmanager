@@ -16,10 +16,8 @@ commandes Git par des menus.
 Au premier lancement, il installe ce qui manque (Git, GitHub CLI) dans sa
 derniere version et affiche l'empreinte SHA-256 de Git pour verification.
 
-Lancement, sans rien installer avant :
-    Windows        : double-clic sur gitmanager.cmd
-    macOS, Linux   : sh gitmanager.sh
-    (avec uv : uv run gitmanager.py ; avec Python 3.9 ou plus : python gitmanager.py)
+Lancement (avec uv) :
+    uv run gitmanager.py
 
 Commande gitmanager sur n'importe quel poste (avec uv) :
     uv tool install https://github.com/SalehKamil/GITManager/archive/refs/heads/main.zip
@@ -2601,8 +2599,8 @@ def menu_perso(cfg):
 
 def main():
     if sys.version_info < (3, 9):
-        print("GITManager demande Python 3.9 ou plus : lance-le avec gitmanager.cmd "
-              "(Windows) ou gitmanager.sh (macOS, Linux).")
+        print("GITManager demande Python 3.9 ou plus : lance-le avec "
+              "uv run gitmanager.py")
         sys.exit(1)
     cfg = charger()
     migrer_ancienne_config(cfg)
