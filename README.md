@@ -2,52 +2,55 @@
 
 <h1 align="center">GITManager</h1>
 
-Ton entreprise n'autorise pas le transfert de fichiers. Tu voudrais pourtant
-travailler sur tes projets depuis ton ordinateur perso, plus confortable,
-puis les envoyer sur ton ordinateur pro. Ou tu veux simplement gérer tes
-dépôts GitHub, sur ta machine comme en ligne.
+Quand l'entreprise n'autorise pas le transfert de fichiers, GITManager permet
+de travailler sur ses projets depuis l'ordinateur perso, plus confortable,
+puis de les envoyer sur l'ordinateur pro. Il sert aussi à gérer ses dépôts
+GitHub, en local comme en ligne.
 
-GITManager est fait pour ça. C'est un petit programme Python qui remplace les
-commandes Git par des menus : tu tapes un numéro, il lance les bonnes
-commandes à ta place.
+C'est un petit programme Python qui remplace les commandes Git par des menus :
+un numéro suffit pour lancer les bonnes commandes.
 
 ## Comment l'utiliser
 
-Tu n'as rien à installer avant : le programme installe lui-même ce qui
-manque.
+Rien n'est à installer avant : le programme installe lui-même ce qui manque.
 
-1. Récupère le projet : sur cette page, clique sur Code, puis sur Download
-   ZIP, et décompresse le fichier.
-2. Lance le programme : sous Windows, double-clique sur `gitmanager.cmd`. Sur
-   macOS ou Linux, tape dans un terminal ouvert dans le dossier :
+1. Récupérer le projet : sur cette page, cliquer sur Code, puis sur Download
+   ZIP, et décompresser le fichier.
+2. Lancer le programme : sous Windows, double-cliquer sur `gitmanager.cmd`.
+   Sous macOS ou Linux, taper dans un terminal ouvert dans le dossier :
 
    ```bash
    sh gitmanager.sh
    ```
 
-Au premier lancement, il installe ce qui manque (Python, Git, GitHub CLI)
-dans la dernière version disponible, puis affiche l'empreinte SHA-256 de Git
-pour que tu puisses la vérifier. Il te demande ensuite : « Que veux-tu
-faire ? ».
+Au premier lancement, le programme installe ce qui manque (Python, Git,
+GitHub CLI) dans la dernière version disponible, puis affiche l'empreinte
+SHA-256 de Git pour la vérifier. Il affiche ensuite le menu principal : taper
+1 pour l'option 1, ou 2 pour l'option 2.
 
-### Option 1 : gérer et parcourir tes dépôts GitHub (ordinateur perso)
+### Option 1 : gérer et parcourir les dépôts GitHub (ordinateur perso)
 
-- Envoyer un projet de cet ordinateur : choisis un projet trouvé sur ta
-  machine, il part sur GitHub.
-- Parcourir mes dépôts GitHub : fichiers, historique, clone, public ou privé,
-  suppression.
-- Tout mettre à jour : tous les projets d'un dossier envoyés d'un coup.
-- Compte GitHub : connexion par le navigateur ou par jeton d'accès,
-  déconnexion.
+1. Envoyer un projet de cet ordinateur : choisir un projet trouvé sur la
+   machine, puis Commit + Push.
+2. Parcourir les dépôts GitHub : fichiers, historique, clone, public ou
+   privé, suppression.
+3. Tout mettre à jour : envoi de tous les projets d'un dossier en une fois.
+4. Compte GitHub : connexion par le navigateur ou par jeton d'accès,
+   déconnexion.
 
 ### Option 2 : synchroniser un dépôt sur l'ordinateur de l'entreprise (ordinateur pro)
 
-- Dépôt à récupérer : ton dépôt GitHub, rendu public le temps de la
-  synchronisation, par exemple `SalehKamil/mon-projet`.
-- Dossier de l'entreprise : le dossier Git du dépôt de l'entreprise, ou son
-  adresse pour le cloner.
-- Connexion : le compte de l'entreprise, séparé de ton compte perso.
-- Confirmation : la liste des fichiers copiés ou supprimés, puis l'envoi.
+Le programme demande d'abord le dépôt à récupérer, par exemple
+`SalehKamil/nom-du-projet`, rendu public le temps de la synchronisation. Il
+demande ensuite où trouver le dépôt de l'entreprise :
+
+1. Le dossier Git est déjà sur ce PC : indiquer son emplacement.
+2. Le cloner depuis le serveur de l'entreprise : indiquer son adresse.
+
+La suite se fait sans chiffre à taper :
+
+- Connexion : compte de l'entreprise, séparé du compte perso.
+- Confirmation : liste des fichiers copiés ou supprimés, puis envoi.
 
 ## Sécurité
 
