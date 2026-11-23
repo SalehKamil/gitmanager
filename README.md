@@ -1,8 +1,8 @@
-<p align="center"><img src=".github/logo.svg" width="96" alt="Logo de GITManager"></p>
+<p align="center"><img src=".github/logo.svg" width="96" alt="Logo de gitmanager"></p>
 
-<h1 align="center">GITManager</h1>
+<h1 align="center">gitmanager</h1>
 
-Quand l'entreprise n'autorise pas le transfert de fichiers, GITManager permet
+Quand l'entreprise n'autorise pas le transfert de fichiers, gitmanager permet
 de travailler sur ses projets depuis l'ordinateur perso, plus confortable,
 puis de les envoyer sur l'ordinateur pro. Il sert aussi à gérer ses dépôts
 GitHub, en local comme en ligne.

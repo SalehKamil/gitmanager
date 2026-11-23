@@ -10,7 +10,7 @@ en local comme en ligne.
 Ton entreprise n'autorise pas le transfert de fichiers. Tu voudrais pourtant
 travailler sur tes projets depuis ton ordinateur perso, plus confortable, puis
 les envoyer sur ton ordinateur pro. Ou tu veux simplement gerer tes depots
-GitHub, sur ta machine comme en ligne. GITManager sert a ca : il remplace les
+GitHub, sur ta machine comme en ligne. gitmanager sert a ca : il remplace les
 commandes Git par des menus.
 
 Au premier lancement, il installe ce qui manque (Git, GitHub CLI) dans sa
@@ -55,6 +55,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
@@ -366,6 +367,36 @@ def nb_commits(chemin, plage="HEAD"):
 def remotes(chemin):
     code, out, _ = git("remote", cwd=chemin, quiet=True)
     return [r.strip() for r in out.splitlines() if r.strip()] if code == 0 else []
+
+
+def urls_remotes(chemin):
+    """{remote: adresse} du projet, en une seule commande git."""
+    _, out, _ = git("config", "--get-regexp", r"^remote\..*\.url$", cwd=chemin, quiet=True)
+    urls = {}
+    for ligne in out.splitlines():
+        cle, _, url = ligne.partition(" ")
+        urls[cle[len("remote."):-len(".url")]] = url
+    return urls
+
+
+def adresse_principale(chemin):
+    urls = urls_remotes(chemin)
+    return urls.get("origin") or next(iter(urls.values()), "")
+
+
+def lien_court(url):
+    """proprietaire/depot, ou la fin de l'adresse, ou 'non relie'."""
+    return (cle_depot(url) or url[-30:]) if url else c("non relie", "90")
+
+
+def apercu_projets(projets, avec_branche=False):
+    """[(adresse, nb de modifications, branche)] calcules en parallele : la
+    liste s'affiche vite meme avec beaucoup de projets (surtout sous Windows)."""
+    def apercu(p):
+        return (adresse_principale(p), len(fichiers_modifies(p)),
+                (branche_courante(p) or "?") if avec_branche else "")
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return list(pool.map(apercu, projets))
 
 
 def remote_principal(chemin):
@@ -925,10 +956,13 @@ def connexion_jeton(cfg):
 def connexion_navigateur(cfg):
     """Connexion interactive : ouvre le navigateur. Retourne True si connecte."""
     methode = methode_dispo(cfg)
-    if not methode:
+    if not methode and not cfg.get("sans_gh"):
         warn("Aucun outil de connexion par le navigateur (GitHub CLI ou Git Credential Manager).")
         if installer_outil("gh"):
             methode = "gh"
+        else:
+            cfg["sans_gh"] = True
+            sauver(cfg)
     if not methode:
         if ask_yn("Se connecter avec un jeton d'acces a la place ?", True):
             return connexion_jeton(cfg)
@@ -1462,13 +1496,14 @@ def index_locaux(cfg):
     """{owner/repo: dossier local} pour les projets deja connus."""
     index = {}
     dossiers = {cfg.get("espace"), os.path.dirname(cfg.get("dernier_dossier") or "")}
-    for d in filter(None, dossiers):
-        if os.path.isdir(d):
-            for p in trouver_projets(d):
-                for r in remotes(p):
-                    cle = cle_depot(url_remote(r, p))
-                    if cle:
-                        index.setdefault(cle, p)
+    projets = [p for d in filter(None, dossiers) if os.path.isdir(d)
+               for p in trouver_projets(d)]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for p, urls in zip(projets, pool.map(urls_remotes, projets)):
+            for url in urls.values():
+                cle = cle_depot(url)
+                if cle:
+                    index.setdefault(cle, p)
     return index
 
 
@@ -1791,13 +1826,10 @@ def act_envoyer_projet(cfg):
     print()
     if projets:
         print(c(f"    {'#':>3}  {'Projet':<44} {'Modifs':>6}  GitHub", "90"))
-        for i, p in enumerate(projets, 1):
-            rm = remote_principal(p)
-            url = url_remote(rm, p) if rm else ""
-            lien = (cle_depot(url) or url[-30:]) if url else c("non relie", "90")
+        for i, (p, (url, modifs, _)) in enumerate(zip(projets, apercu_projets(projets)), 1):
             nom = nom_court(p)
             nom = nom if len(nom) <= 44 else "~" + nom[-43:]
-            print(f"    {i:>3}. {nom:<44} {len(fichiers_modifies(p)):>6}  {lien}")
+            print(f"    {i:>3}. {nom:<44} {modifs:>6}  {lien_court(url)}")
     else:
         info("Aucun projet git trouve aux emplacements habituels.")
     print()
@@ -1835,13 +1867,9 @@ def act_tout(cfg):
         return
     print()
     print(c(f"    {'Projet':<28} {'Branche':<12} {'Modifs':>6}  Serveur", "1"))
-    for p in projets:
+    for p, (url, modifs, branche) in zip(projets, apercu_projets(projets, True)):
         nom = os.path.relpath(p, dossier) if p != dossier else os.path.basename(p)
-        rm = remote_principal(p)
-        url = url_remote(rm, p) if rm else ""
-        lien = (cle_depot(url) or url[-30:]) if url else c("non relie", "90")
-        print(f"    {nom[:28]:<28} {(branche_courante(p) or '?')[:12]:<12} "
-              f"{len(fichiers_modifies(p)):>6}  {lien}")
+        print(f"    {nom[:28]:<28} {branche[:12]:<12} {modifs:>6}  {lien_court(url)}")
     print()
     print("    1. Tout envoyer        (commit + push de chaque projet)")
     print("    2. Recuperer seulement (pull, rien n'est envoye)")
@@ -2550,7 +2578,7 @@ def lancer(fn, cfg, avec_pause=True):
 
 
 def choisir_fonction(cfg):
-    titre("GITMANAGER")
+    titre("gitmanager")
     print(c("    Code chez toi, pousse au bureau, et gere tes depots GitHub", "36"))
     print(c("    en local comme en ligne.", "36"))
     print()
@@ -2599,7 +2627,7 @@ def menu_perso(cfg):
 
 def main():
     if sys.version_info < (3, 9):
-        print("GITManager demande Python 3.9 ou plus : lance-le avec "
+        print("gitmanager demande Python 3.9 ou plus : lance-le avec "
               "uv run gitmanager.py")
         sys.exit(1)
     cfg = charger()
