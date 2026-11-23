@@ -3,8 +3,8 @@
 <h1 align="center">gitmanager</h1>
 
 <p align="center">
-  gitmanager gère les dépôts Git et GitHub par des menus numérotés,
-  dans le terminal.
+  Code chez toi, pousse au bureau, et gère tes dépôts GitHub en local comme en ligne.<br>
+  <sub>Code at home, push at work, and manage your GitHub repos locally and online.</sub>
 </p>
 
 <p align="center">
@@ -14,8 +14,10 @@
 <p align="center"><img src="docs/apercu.png" width="720" alt="Les deux premiers menus de gitmanager dans un terminal"></p>
 
 `gitmanager.py` est un script Python qui remplace les commandes Git par des
-menus. Il sert à envoyer et récupérer ses projets, et à gérer ses dépôts
-GitHub sans retenir de commande.
+menus. Il permet de travailler sur un projet depuis son PC perso, puis de
+l'envoyer dans le dépôt de l'entreprise depuis son poste pro. Il gère aussi
+les dépôts GitHub, en local (commit, push, pull) comme en ligne (parcourir,
+cloner, rendre public ou privé, supprimer), sans retenir de commande.
 
 Le script tient en un seul fichier et n'utilise que la bibliothèque standard
 de Python. Il se lance avec `uv run gitmanager.py` ou `python gitmanager.py`.
