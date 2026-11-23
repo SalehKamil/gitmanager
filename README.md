@@ -27,40 +27,41 @@ uv tool install https://github.com/SalehKamil/gitmanager/archive/refs/heads/main
 Il se lance ensuite en tapant `gitmanager`, depuis n'importe quel dossier. La
 même installation avec `--reinstall` le met à jour.
 
-Au premier lancement, le programme installe Git et GitHub CLI s'ils manquent,
-dans la dernière version disponible, puis affiche l'empreinte SHA-256 de Git
-pour la vérifier. Il affiche ensuite le menu principal : taper 1 pour
-l'option 1, ou 2 pour l'option 2.
+Au lancement, le programme affiche son logo et son accroche. Il installe
+Git et GitHub CLI s'ils manquent, dans la dernière version disponible, et
+affiche l'empreinte SHA-256 de Git pour la vérifier. Il demande ensuite la
+connexion au compte GitHub, par le navigateur ou par jeton d'accès : sans
+connexion, il s'arrête. Le menu principal propose alors deux options.
 
-### Option 1 : gérer les dépôts (ordinateur perso)
+### Option 1 : gérer les dépôts
 
-La connexion au compte GitHub perso se fait toujours en premier, par le
-navigateur ou par jeton d'accès.
+À utiliser sur l'ordinateur perso.
 
 1. Gérer les dépôts GitHub : la liste des dépôts en ligne.
    - Parcourir les fichiers et voir les commits.
    - Rendre public ou privé.
-   - Ouvrir la copie locale, ou la cloner : le dossier s'ouvre dans le
-     gestionnaire de fichiers (Explorateur, Finder...) et son menu dans le
-     terminal.
+   - Ouvrir la copie : le dossier s'ouvre dans le gestionnaire de fichiers
+     du système et son menu dans le terminal.
+   - Cloner le projet en local, quand aucune copie n'existe.
    - Ouvrir dans le navigateur.
    - Supprimer.
 2. Gérer les dépôts locaux : la liste des dépôts trouvés sur l'ordinateur.
    - Envoyer : commit et push.
    - Mettre à jour : pull.
    - Écraser : force push, GitHub prend le contenu du dossier.
-   - Voir les modifications, commit seul, push seul, public ou privé,
-     relier à un autre dépôt, supprimer le `.git`.
+   - Voir les modifications, rendre public ou privé, relier à un autre
+     dépôt, supprimer le `.git`.
    - Tout mettre à jour : tous les dépôts d'un dossier en une fois.
    - Envoyer un dossier : sans dépôt local, ou pour un nouveau projet ; le
      programme demande le nom, la description et la visibilité du dépôt.
 3. Compte GitHub : connexion, déconnexion, changement de serveur.
 
-### Option 2 : synchroniser un dépôt sur l'ordinateur de l'entreprise (ordinateur pro)
+### Option 2 : synchroniser un dépôt sur l'ordinateur de l'entreprise
 
-Le programme demande d'abord le dépôt à récupérer, par exemple
-`SalehKamil/nom-du-projet`, rendu public le temps de la synchronisation. Il
-demande ensuite où trouver le dépôt de l'entreprise :
+À utiliser sur l'ordinateur pro. Le programme demande d'abord le dépôt à
+récupérer, par exemple `SalehKamil/nom-du-projet`. Un dépôt privé est
+récupéré avec le compte GitHub connecté. Il demande ensuite où trouver le
+dépôt de l'entreprise :
 
 1. Le dossier Git est déjà sur ce PC : indiquer son emplacement.
 2. Le cloner depuis le serveur de l'entreprise : indiquer son adresse.
