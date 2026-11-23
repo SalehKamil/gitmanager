@@ -1,11 +1,11 @@
-# GITManager
+<p align="center"><img src=".github/logo.svg" width="96" alt="Logo de GITManager"></p>
 
-Code chez toi, pousse au bureau, et gère tes dépôts GitHub en local comme en
-ligne.
+<h1 align="center">GITManager</h1>
 
-Code at home, push at work, and manage your GitHub repos locally and online.
-
-## Description
+<p align="center">
+  Code chez toi, pousse au bureau, et gère tes dépôts GitHub en local comme en ligne.<br>
+  Code at home, push at work, and manage your GitHub repos locally and online.
+</p>
 
 Ton entreprise n'autorise pas le transfert de fichiers. Tu voudrais pourtant
 travailler sur tes projets depuis ton ordinateur perso, plus confortable,
@@ -13,74 +13,55 @@ puis les envoyer sur ton ordinateur pro. Ou tu veux simplement gérer tes
 dépôts GitHub, sur ta machine comme en ligne.
 
 GITManager est fait pour ça. C'est un petit programme Python qui remplace les
-commandes Git par des menus. Tu tapes un numéro, et le programme lance les
-bonnes commandes à ta place.
+commandes Git par des menus : tu tapes un numéro, il lance les bonnes
+commandes à ta place.
 
 ## Comment l'utiliser
 
 Tu n'as rien à installer avant : le programme installe lui-même ce qui
 manque.
 
-1. Récupère le projet. Sur la page GitHub du projet, clique sur Code, puis
-   sur Download ZIP, et décompresse le fichier. Si Git est déjà installé, tu
-   peux aussi le cloner :
-
-   ```bash
-   git clone https://github.com/SalehKamil/GITManager.git
-   ```
-
-2. Lance le programme. Sous Windows, double-clique sur `gitmanager.cmd`. Sur
-   macOS ou Linux, ouvre un terminal dans le dossier du projet et tape :
+1. Récupère le projet : sur cette page, clique sur Code, puis sur Download
+   ZIP, et décompresse le fichier.
+2. Lance le programme : sous Windows, double-clique sur `gitmanager.cmd`. Sur
+   macOS ou Linux, tape dans un terminal ouvert dans le dossier :
 
    ```bash
    sh gitmanager.sh
    ```
 
-Au premier lancement, le lanceur installe Python s'il manque. Le programme
-vérifie ensuite que Git est installé, ainsi qu'un outil pour te connecter à
-GitHub par le navigateur, comme GitHub CLI. S'il en manque un, il te propose
-de l'installer dans sa dernière version disponible.
+Au premier lancement, il installe ce qui manque (Python, Git, GitHub CLI)
+dans la dernière version disponible, puis affiche l'empreinte SHA-256 de Git
+pour que tu puisses la vérifier. Il te demande ensuite : « Que veux-tu
+faire ? ».
 
-Après l'installation de Git, le programme affiche son empreinte SHA-256.
-C'est une suite de chiffres et de lettres qui permet de vérifier que le
-fichier installé est bien l'original. Ensuite, une fois par semaine, le
-programme regarde si une nouvelle version de Git existe et te propose la mise
-à jour.
+### Option 1 : gérer et parcourir tes dépôts GitHub (ordinateur perso)
 
-Le programme te demande ensuite : « Que veux-tu faire ? ». Il retient tes
-réponses : au lancement suivant, appuie sur Entrée pour garder la réponse
-proposée.
+- Envoyer un projet de cet ordinateur : choisis un projet trouvé sur ta
+  machine, il part sur GitHub.
+- Parcourir mes dépôts GitHub : fichiers, historique, clone, public ou privé,
+  suppression.
+- Tout mettre à jour : tous les projets d'un dossier envoyés d'un coup.
+- Compte GitHub : connexion par le navigateur ou par jeton d'accès,
+  déconnexion.
 
-### Option 1 : gérer et parcourir tes dépôts GitHub
+### Option 2 : synchroniser un dépôt sur l'ordinateur de l'entreprise (ordinateur pro)
 
-Tape 1 sur ton ordinateur perso. Le programme te connecte à ton compte GitHub
-par le navigateur.
-
-Pour envoyer un projet sur GitHub, choisis « Envoyer un projet de cet
-ordinateur ». Le programme te montre les projets trouvés sur ta machine. Tape
-le numéro du projet, puis 1.
-
-Pour voir tes dépôts en ligne, choisis « Parcourir mes dépôts GitHub ». Tu
-peux voir leurs fichiers, les cloner, les rendre publics ou privés, ou les
-supprimer.
-
-### Option 2 : synchroniser un dépôt sur l'ordinateur de l'entreprise
-
-Tape 2 sur ton ordinateur pro. Avant, rends ton dépôt public depuis ton
-ordinateur perso, avec l'option 1.
-
-Le programme te demande le nom de ton dépôt, puis l'emplacement du dossier
-Git de l'entreprise. Si besoin, il te connecte au compte de l'entreprise. Il
-te montre les fichiers qui vont être copiés ou supprimés et te demande de
-confirmer. Ensuite, il envoie ton projet dans le dépôt de l'entreprise.
-
-Quand c'est fini, remets ton dépôt en privé.
+- Dépôt à récupérer : ton dépôt GitHub, rendu public le temps de la
+  synchronisation, par exemple `SalehKamil/mon-projet`.
+- Dossier de l'entreprise : le dossier Git du dépôt de l'entreprise, ou son
+  adresse pour le cloner.
+- Connexion : le compte de l'entreprise, séparé de ton compte perso.
+- Confirmation : la liste des fichiers copiés ou supprimés, puis l'envoi.
 
 ## Sécurité
 
-Le programme communique seulement par des connexions chiffrées. Il n'écrit
-aucun mot de passe sur le disque. Si tu te connectes avec un jeton d'accès,
-c'est-à-dire un code secret créé sur GitHub, il reste en mémoire et disparaît
-quand le programme se ferme. Avant chaque envoi, il retire les
-fichiers secrets, comme les fichiers `.env` et les clés privées. Avant de
-rendre un dépôt public, il te prévient s'il y trouve ce genre de fichier.
+<p>
+<img src="https://img.shields.io/badge/Connexions-HTTPS%20ou%20SSH-2ea44f" alt="Connexions : HTTPS ou SSH">
+<img src="https://img.shields.io/badge/Certificats-toujours%20v%C3%A9rifi%C3%A9s-2ea44f" alt="Certificats : toujours vérifiés">
+<img src="https://img.shields.io/badge/Mots%20de%20passe-jamais%20sur%20le%20disque-2ea44f" alt="Mots de passe : jamais sur le disque">
+<img src="https://img.shields.io/badge/Jetons-en%20m%C3%A9moire%20seulement-2ea44f" alt="Jetons : en mémoire seulement">
+<img src="https://img.shields.io/badge/Fichiers%20secrets-exclus%20de%20l%27envoi-2ea44f" alt="Fichiers secrets : exclus de l'envoi">
+<img src="https://img.shields.io/badge/D%C3%A9p%C3%B4t%20public-alerte%20si%20secrets-2ea44f" alt="Dépôt public : alerte si secrets">
+<img src="https://img.shields.io/badge/Git-empreinte%20SHA--256%20affich%C3%A9e-2ea44f" alt="Git : empreinte SHA-256 affichée">
+</p>
