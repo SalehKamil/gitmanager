@@ -52,64 +52,40 @@ fichier installé est bien l'original. Ensuite, une fois par semaine, le
 programme regarde si une nouvelle version de Git existe et te propose la mise
 à jour.
 
-Le programme te demande alors : « Que veux-tu faire ? ». Tape 1 sur ton
-ordinateur perso, ou 2 sur l'ordinateur de l'entreprise. Il retient tes
+Le programme te demande ensuite : « Que veux-tu faire ? ». Il retient tes
 réponses : au lancement suivant, appuie sur Entrée pour garder la réponse
 proposée.
 
-## Option 1 : gérer et parcourir tes dépôts GitHub
+### Option 1 : gérer et parcourir tes dépôts GitHub
 
-Utilise cette option sur ton ordinateur perso. Le programme te connecte
-d'abord à ton compte GitHub : une page s'ouvre dans ton navigateur pour
-valider la connexion. Si ce n'est pas possible, il te demande un jeton
-d'accès, c'est-à-dire un code secret que tu crées dans les paramètres de
-GitHub.
+Tape 1 sur ton ordinateur perso. Le programme te connecte à ton compte GitHub
+par le navigateur.
 
-Le choix « Envoyer un projet de cet ordinateur » cherche les projets Git
-présents sur ta machine. Il te les montre du plus récent au plus ancien. Tape
-le numéro du projet, puis 1 pour l'envoyer sur GitHub. Si ton projet n'est
-pas dans la liste, tape son chemin. S'il n'est pas encore sur GitHub, le
-programme crée le dépôt pour toi, en privé par défaut.
+Pour envoyer un projet sur GitHub, choisis « Envoyer un projet de cet
+ordinateur ». Le programme te montre les projets trouvés sur ta machine. Tape
+le numéro du projet, puis 1.
 
-Le choix « Parcourir mes dépôts GitHub » affiche la liste de tes dépôts. Pour
-chacun, tu peux voir les fichiers et l'historique, le cloner sur ta machine,
-le rendre public ou privé, ou le supprimer.
+Pour voir tes dépôts en ligne, choisis « Parcourir mes dépôts GitHub ». Tu
+peux voir leurs fichiers, les cloner, les rendre publics ou privés, ou les
+supprimer.
 
-Le menu permet aussi de mettre à jour tous tes projets d'un coup et de gérer
-ta connexion à GitHub.
+### Option 2 : synchroniser un dépôt sur l'ordinateur de l'entreprise
 
-## Option 2 : synchroniser un dépôt sur l'ordinateur de l'entreprise
+Tape 2 sur ton ordinateur pro. Avant, rends ton dépôt public depuis ton
+ordinateur perso, avec l'option 1.
 
-Utilise cette option sur ton ordinateur pro. Elle copie ton projet depuis
-GitHub vers le dépôt de l'entreprise.
+Le programme te demande le nom de ton dépôt, puis l'emplacement du dossier
+Git de l'entreprise. Si besoin, il te connecte au compte de l'entreprise. Il
+te montre les fichiers qui vont être copiés ou supprimés et te demande de
+confirmer. Ensuite, il envoie ton projet dans le dépôt de l'entreprise.
 
-Avant de commencer, rends ton dépôt public avec l'option 1, sur ton
-ordinateur perso. Le programme peut alors le récupérer sans te connecter à
-ton compte perso. Si ton dépôt reste privé, le programme te demande un jeton
-d'accès de ton compte perso, seulement pour cette récupération.
-
-Le programme suit ces étapes :
-
-1. Il te demande le nom de ton dépôt, par exemple `SalehKamil/mon-projet`.
-2. Il te demande où se trouve le dossier Git du dépôt de l'entreprise sur ton
-   ordinateur. S'il n'y est pas encore, donne son adresse et le programme le
-   télécharge.
-3. Il vérifie ta connexion au serveur de l'entreprise. Si besoin, il te
-   demande de te connecter : c'est une deuxième connexion, séparée de ton
-   compte perso.
-4. Il télécharge ton dépôt dans un dossier temporaire. Il te montre les
-   fichiers qui vont être copiés ou supprimés et te demande de confirmer. Le
-   dossier de l'entreprise devient alors identique à ton projet, et son
-   historique Git est conservé.
-5. Il enregistre les changements, les envoie sur le serveur de l'entreprise,
-   puis efface le dossier temporaire.
-
-Quand c'est fini, remets ton dépôt en privé depuis ton ordinateur perso.
+Quand c'est fini, remets ton dépôt en privé.
 
 ## Sécurité
 
 Le programme communique seulement par des connexions chiffrées. Il n'écrit
-aucun mot de passe ni jeton sur le disque : un jeton reste en mémoire et
-disparaît quand le programme se ferme. Avant chaque envoi, il retire les
+aucun mot de passe sur le disque. Si tu te connectes avec un jeton d'accès,
+c'est-à-dire un code secret créé sur GitHub, il reste en mémoire et disparaît
+quand le programme se ferme. Avant chaque envoi, il retire les
 fichiers secrets, comme les fichiers `.env` et les clés privées. Avant de
 rendre un dépôt public, il te prévient s'il y trouve ce genre de fichier.

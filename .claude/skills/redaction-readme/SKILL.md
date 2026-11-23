@@ -1,6 +1,6 @@
 ---
 name: redaction-readme
-description: Écrire ou refaire le README d'un projet de Kamil pour une personne qui découvre le projet et veut s'en servir. Structure fixe (titre, accroche, Description, Comment l'utiliser, une partie par option, Sécurité courte), français simple, sans tableau, sans sommaire, sans dépannage ni limites. À lire avant d'écrire ou de réécrire un README.
+description: Écrire ou refaire le README d'un projet de Kamil pour une personne qui découvre le projet et veut s'en servir. Structure fixe (titre, accroche, Description, Comment l'utiliser avec une sous-partie courte par option, Sécurité courte), français simple, sans tableau, sans sommaire, sans dépannage ni limites. À lire avant d'écrire ou de réécrire un README.
 ---
 
 # Rédaction d'un README
@@ -28,10 +28,11 @@ Le README suit cet ordre, et rien d'autre :
    situation.
 4. `## Comment l'utiliser` : ce qu'il faut avoir sur son ordinateur, comment
    récupérer le projet, comment le lancer, ce qui se passe au premier
-   lancement.
-5. Une partie par option de l'outil : `## Option 1 : ...`, `## Option 2 :
-   ...`. Chaque partie dit où l'utiliser, ce que l'utilisateur choisit, ce
-   que l'outil fait et ce qu'il obtient, dans l'ordre où ça se passe.
+   lancement. Les options de l'outil viennent à la fin de cette partie, en
+   sous-parties : `### Option 1 : ...`, `### Option 2 : ...`.
+5. Chaque option tient en deux ou trois paragraphes courts : le numéro à
+   taper et où l'utiliser, ce que l'outil demande et fait, ce que tu
+   obtiens. Seulement l'essentiel : pas de liste d'étapes détaillée.
 6. `## Sécurité` : un court paragraphe avec l'essentiel. Pas d'énumération
    de toutes les protections.
 
@@ -101,11 +102,12 @@ Ce qu'il faut avoir, en une phrase.
 
 Ce qui se passe au premier lancement, en deux phrases.
 
-## Option 1 : ...
+### Option 1 : ...
 
-Où l'utiliser. Ce que tu choisis, ce que l'outil fait, ce que tu obtiens.
+Le numéro à taper et où l'utiliser. Ce que l'outil demande et fait, ce que
+tu obtiens.
 
-## Option 2 : ...
+### Option 2 : ...
 
 Même chose.
 
