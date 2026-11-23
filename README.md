@@ -3,7 +3,8 @@
 <h1 align="center">gitmanager</h1>
 
 <p align="center">
-  Code chez toi, pousse au bureau, et gère tes dépôts GitHub en local comme en ligne.<br>
+  Code chez toi, pousse au bureau, et gère tes dépôts GitHub
+  en local comme en ligne.<br>
   <sub>Code at home, push at work, and manage your GitHub repos locally and online.</sub>
 </p>
 
