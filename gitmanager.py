@@ -1853,11 +1853,11 @@ def act_depots_locaux(cfg):
         if ask_yn("Envoyer un dossier sur GitHub ?", True):
             act_autre_dossier(cfg)
         return
-    print(c(f"    {'#':>3}  {'Depot':<44} {'Modifs':>6}  GitHub", "90"))
+    print(c(f"    {'#':>3}  {'Depot':<44} {'A commiter':>10}  GitHub", "90"))
     for i, (p, (url, modifs, _)) in enumerate(zip(projets, apercu_projets(projets)), 1):
         nom = nom_court(p)
         nom = nom if len(nom) <= 44 else "~" + nom[-43:]
-        print(f"    {i:>3}. {nom:<44} {modifs:>6}  {lien_court(url)}")
+        print(f"    {i:>3}. {nom:<44} {modifs:>10}  {lien_court(url)}")
     print()
     print("      N. Envoyer un autre dossier sur GitHub (nouveau ou non liste)")
     print("      T. Tout mettre a jour   (tous les depots d'un dossier)")
@@ -1885,10 +1885,10 @@ def act_tout(cfg):
         warn("Aucun projet git trouve dans ce dossier (ni dans ses sous-dossiers).")
         return
     print()
-    print(c(f"    {'Projet':<28} {'Branche':<12} {'Modifs':>6}  Serveur", "1"))
+    print(c(f"    {'Projet':<28} {'Branche':<12} {'A commiter':>10}  Serveur", "1"))
     for p, (url, modifs, branche) in zip(projets, apercu_projets(projets, True)):
         nom = os.path.relpath(p, dossier) if p != dossier else os.path.basename(p)
-        print(f"    {nom[:28]:<28} {branche[:12]:<12} {modifs:>6}  {lien_court(url)}")
+        print(f"    {nom[:28]:<28} {branche[:12]:<12} {modifs:>10}  {lien_court(url)}")
     print()
     print("    1. Tout envoyer        (commit + push de chaque projet)")
     print("    2. Recuperer seulement (pull, rien n'est envoye)")
@@ -1955,6 +1955,28 @@ def act_depots(cfg):
             filtre = "" if choix == "*" else choix
 
 
+def ouvrir_explorateur(chemin):
+    """Ouvre le dossier dans le gestionnaire de fichiers du systeme (Explorateur
+    sous Windows, Finder sous macOS, celui du bureau sous Linux), sans bloquer."""
+    try:
+        if os.name == "nt":
+            os.startfile(chemin)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", chemin], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        else:
+            outil = shutil.which("xdg-open") or shutil.which("gio")
+            if not outil or not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+                info(f"Pas de bureau graphique : dossier {chemin}")
+                return
+            cmd = [outil, "open", chemin] if os.path.basename(outil) == "gio" else [outil, chemin]
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        ok(f"Dossier ouvert dans le gestionnaire de fichiers : {chemin}")
+    except OSError as e:
+        warn(f"Ouverture du dossier impossible ({e}) : {chemin}")
+
+
 def menu_depot(cfg, d, locaux):
     while True:
         local = locaux.get(d["full_name"].lower())
@@ -1965,13 +1987,13 @@ def menu_depot(cfg, d, locaux):
         info(d["html_url"])
         info(f"Branche principale : {d.get('default_branch') or '-'}    "
              f"Dernier envoi : {(d.get('pushed_at') or '-')[:10]}")
-        info(f"Copie sur ce PC : {local or 'aucune'}")
+        info(f"Copie sur cet ordinateur : {local or 'aucune'}")
         print()
         print("    1. Parcourir les fichiers")
         print("    2. Voir les commits (et ce que chacun a change)")
         print("    3. Rendre " + ("PUBLIC" if d.get("private") else "PRIVE"))
-        print("    4. " + ("Ouvrir la copie de ce PC (commit, push, pull...)" if local
-                          else "Cloner sur ce PC puis travailler dessus"))
+        print("    4. " + ("Ouvrir la copie de cet ordinateur (dossier + menu du depot)" if local
+                          else "Cloner sur cet ordinateur puis l'ouvrir"))
         print("    5. Ouvrir dans le navigateur")
         print("    6. Supprimer de GitHub")
         print("    0. Retour a la liste")
@@ -1989,6 +2011,7 @@ def menu_depot(cfg, d, locaux):
                 if local:
                     locaux[d["full_name"].lower()] = local
             if local:
+                ouvrir_explorateur(local)
                 menu_projet(cfg, local)
         elif choix == "5":
             webbrowser.open(d["html_url"])

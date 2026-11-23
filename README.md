@@ -40,7 +40,10 @@ navigateur ou par jeton d'accès.
 1. Gérer les dépôts GitHub : la liste des dépôts en ligne.
    - Parcourir les fichiers et voir les commits.
    - Rendre public ou privé.
-   - Cloner sur l'ordinateur ou ouvrir dans le navigateur.
+   - Ouvrir la copie locale, ou la cloner : le dossier s'ouvre dans le
+     gestionnaire de fichiers (Explorateur, Finder...) et son menu dans le
+     terminal.
+   - Ouvrir dans le navigateur.
    - Supprimer.
 2. Gérer les dépôts locaux : la liste des dépôts trouvés sur l'ordinateur.
    - Envoyer : commit et push.
