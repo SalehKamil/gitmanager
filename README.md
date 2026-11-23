@@ -25,13 +25,24 @@ uv tool install https://github.com/SalehKamil/gitmanager/archive/refs/heads/main
 ```
 
 Il se lance ensuite en tapant `gitmanager`, depuis n'importe quel dossier. La
-même installation avec `--reinstall` le met à jour.
+même installation avec `--reinstall` le met à jour. Pour le désinstaller :
 
-Au lancement, le programme affiche son logo et son accroche. Il installe
-Git et GitHub CLI s'ils manquent, dans la dernière version disponible, et
-affiche l'empreinte SHA-256 de Git pour la vérifier. Il demande ensuite la
-connexion au compte GitHub, par le navigateur ou par jeton d'accès : sans
-connexion, il s'arrête. Le menu principal propose alors deux options.
+```bash
+uv tool uninstall gitmanager
+```
+
+Au lancement, le programme affiche son logo et son accroche. Il installe Git
+s'il manque, dans la dernière version disponible, et affiche son empreinte
+SHA-256 pour la vérifier. Il demande ensuite la connexion au compte GitHub :
+sans connexion, il s'arrête.
+
+Au premier lancement, le programme demande s'il faut enregistrer la connexion
+sur le poste. Sur l'ordinateur perso, la réponse oui garde la connexion dans
+le coffre du système, avec GitHub CLI ou Git Credential Manager. Sur un poste
+partagé ou pro, la réponse non garde la connexion en mémoire seulement : elle
+s'efface à la fermeture du programme et après 15 minutes sans activité.
+
+Le menu principal propose ensuite deux options.
 
 ### Option 1 : gérer les dépôts
 
@@ -54,7 +65,8 @@ connexion, il s'arrête. Le menu principal propose alors deux options.
    - Tout mettre à jour : tous les dépôts d'un dossier en une fois.
    - Envoyer un dossier : sans dépôt local, ou pour un nouveau projet ; le
      programme demande le nom, la description et la visibilité du dépôt.
-3. Compte GitHub : connexion, déconnexion, changement de serveur.
+3. Compte GitHub : connexion, déconnexion, enregistrement ou non de la
+   connexion sur le poste, changement de serveur.
 
 ### Option 2 : synchroniser un dépôt sur l'ordinateur de l'entreprise
 
@@ -76,8 +88,9 @@ La suite se fait sans chiffre à taper :
 <p>
 <img src="https://img.shields.io/badge/Connexions-HTTPS%20ou%20SSH-2ea44f" alt="Connexions : HTTPS ou SSH">
 <img src="https://img.shields.io/badge/Certificats-toujours%20v%C3%A9rifi%C3%A9s-2ea44f" alt="Certificats : toujours vérifiés">
-<img src="https://img.shields.io/badge/Mots%20de%20passe-jamais%20sur%20le%20disque-2ea44f" alt="Mots de passe : jamais sur le disque">
-<img src="https://img.shields.io/badge/Jetons-en%20m%C3%A9moire%20seulement-2ea44f" alt="Jetons : en mémoire seulement">
+<img src="https://img.shields.io/badge/Poste%20pro-aucune%20connexion%20enregistr%C3%A9e-2ea44f" alt="Poste pro : aucune connexion enregistrée">
+<img src="https://img.shields.io/badge/Inactivit%C3%A9-connexion%20oubli%C3%A9e%20apr%C3%A8s%2015%20min-2ea44f" alt="Inactivité : connexion oubliée après 15 min">
+<img src="https://img.shields.io/badge/Identifiants%20en%20clair-alerte-2ea44f" alt="Identifiants en clair : alerte">
 <img src="https://img.shields.io/badge/Fichiers%20secrets-exclus%20de%20l%27envoi-2ea44f" alt="Fichiers secrets : exclus de l'envoi">
 <img src="https://img.shields.io/badge/D%C3%A9p%C3%B4t%20public-alerte%20si%20secrets-2ea44f" alt="Dépôt public : alerte si secrets">
 <img src="https://img.shields.io/badge/Git-empreinte%20SHA--256%20affich%C3%A9e-2ea44f" alt="Git : empreinte SHA-256 affichée">

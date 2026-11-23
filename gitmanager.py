@@ -22,15 +22,16 @@ Lancement (avec uv) :
 Commande gitmanager sur n'importe quel poste (avec uv) :
     uv tool install https://github.com/SalehKamil/gitmanager/archive/refs/heads/main.zip
 
-Au lancement : logo, accroche, puis connexion obligatoire au compte
-GitHub ; sans connexion, le programme s'arrete. Menu principal :
+Au lancement : logo, accroche, puis connexion obligatoire au compte GitHub ;
+sans connexion, le programme s'arrete. Menu principal :
 
   1. Gerer les depots, sur l'ordinateur perso
-     - Gerer les depots GitHub : fichiers, commits, public / prive, ouvrir
-       la copie locale ou cloner le projet en local, supprimer.
-     - Gerer les depots locaux : envoyer (commit + push), mettre a jour
-       (pull), ecraser (force push), tout mettre a jour ; sans depot local,
-       envoi d'un dossier sur GitHub avec nom, description et visibilite.
+     - Gerer les depots GitHub : fichiers, commits, public / prive, ouvrir la
+       copie locale ou cloner le projet en local, supprimer.
+     - Gerer les depots locaux : envoyer, c'est-a-dire commit + push ; mettre
+       a jour par pull ; ecraser par force push ; tout mettre a jour ; sans
+       depot local, envoi d'un dossier sur GitHub avec nom, description et
+       visibilite.
 
   2. Synchroniser un depot sur l'ordinateur de l'entreprise
      Recupere le depot GitHub dans un dossier temporaire, sans identifiant
@@ -39,8 +40,15 @@ GitHub ; sans connexion, le programme s'arrete. Menu principal :
      commit + push avec le compte de l'entreprise, seconde authentification
      distincte du compte perso.
 
+Connexion : au premier lancement, le programme demande s'il faut enregistrer
+la connexion sur le poste. Oui, sur un ordinateur perso : GitHub CLI ou Git
+Credential Manager, dans le coffre du systeme. Non, sur un poste partage ou
+pro : connexion par code ou par jeton, gardee en memoire seulement, oubliee
+apres 15 minutes sans activite et a la fermeture du programme.
+
 Securite : HTTPS ou SSH seulement, certificats toujours verifies, aucun
-jeton ecrit sur le disque, dans une URL ni sur la ligne de commande.
+jeton ecrit sur le disque, dans une URL ni sur la ligne de commande ; alerte
+si Git ecrit des identifiants en clair.
 """
 
 import base64
@@ -55,6 +63,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -168,12 +177,24 @@ def taille(n):
 
 # Saisie
 
+DELAI_INACTIVITE = 15 * 60  # connexion en memoire oubliee apres 15 minutes sans saisie
+
+
+def saisie(invite):
+    """input() qui oublie la connexion en memoire apres une longue inactivite."""
+    debut = time.time()
+    rep = input(invite)
+    if time.time() - debut > DELAI_INACTIVITE:
+        oublier_connexion_memoire()
+    return rep
+
+
 def ask(question, defaut="", obligatoire=True):
     """Entree vide -> valeur par defaut. Une valeur par defaut vide ne
     valide jamais une question obligatoire."""
     suffixe = f" [{defaut}]" if defaut else ""
     while True:
-        rep = input(c(f"  {question}{suffixe} : ", "1")).strip()
+        rep = saisie(c(f"  {question}{suffixe} : ", "1")).strip()
         if rep:
             return rep
         if defaut:
@@ -185,14 +206,14 @@ def ask(question, defaut="", obligatoire=True):
 
 def ask_yn(question, defaut=False):
     d = "O/n" if defaut else "o/N"
-    rep = input(c(f"  {question} [{d}] : ", "1")).strip().lower()
+    rep = saisie(c(f"  {question} [{d}] : ", "1")).strip().lower()
     if not rep:
         return defaut
     return rep in ("o", "oui", "y", "yes")
 
 
 def pause():
-    input(c("\n  (Entree pour continuer)", "90"))
+    saisie(c("\n  Entree pour continuer", "90"))
 
 
 def message_defaut():
@@ -270,7 +291,7 @@ def identite_courante():
     """(utilisateur, jeton) a utiliser pour git, ou None (gestionnaire du PC)."""
     if MODE["nom"] == "entreprise":
         return (MODE["utilisateur"], MODE["jeton"]) if MODE["jeton"] else None
-    if SESSION["methode"] == "jeton" and SESSION["token"]:
+    if SESSION["methode"] in EN_MEMOIRE and SESSION["token"]:
         return ("", SESSION["token"])
     return None
 
@@ -558,7 +579,9 @@ def url_web(url):
 # Connexion GitHub par le navigateur (gh ou Git Credential Manager)
 
 SESSION = {"token": "", "user": None, "methode": None}
+EN_MEMOIRE = ("jeton", "code")  # connexions jamais enregistrees sur le poste
 NOMS_METHODES = {"gh": "GitHub CLI", "gcm": "Git Credential Manager",
+                 "code": "code, en memoire seulement",
                  "jeton": "jeton en memoire"}
 _CACHE_GCM = []
 
@@ -717,7 +740,7 @@ def installer_outil(outil, mise_a_jour=False):
     g = gestionnaire_paquets()
     if not g:
         if outil == "git" and sys.platform == "darwin":
-            info("Les outils de developpement d'Apple contiennent Git (une fenetre s'ouvre).")
+            info("Les outils de developpement d'Apple contiennent Git : une fenetre s'ouvre.")
             if ask_yn("Les installer maintenant ?", True):
                 subprocess.run(["xcode-select", "--install"])
                 info("Relancer le programme quand l'installation est terminee.")
@@ -774,12 +797,43 @@ def preparer_outils(cfg):
             if mise_a_jour_git_dispo(g):
                 warn("Une nouvelle version de Git est disponible.")
                 installer_outil("git", mise_a_jour=True)
-    if not chemin_gh() and not helper_gcm() and not cfg.get("sans_gh"):
-        info("GitHub CLI sert a se connecter a GitHub par le navigateur.")
-        if not installer_outil("gh"):
-            cfg["sans_gh"] = True  # ne plus le proposer : un jeton reste possible
     sauver(cfg)
+    verifier_identifiants_en_clair(cfg)
     return True
+
+
+def verifier_identifiants_en_clair(cfg):
+    """Alerte si Git ecrit des identifiants en clair sur le poste : reglage
+    credential.helper store et fichier ~/.git-credentials."""
+    _, out, _ = git("config", "--global", "--get-regexp", r"^credential(\..+)?\.helper$",
+                    quiet=True)
+    stores = [l.split(" ", 1)[0] for l in out.splitlines()
+              if " " in l and l.split(" ", 1)[1].strip().startswith("store")]
+    fichier = Path.home() / ".git-credentials"
+    if not stores and not fichier.exists():
+        return
+    warn("Git enregistre des identifiants en clair sur ce poste.")
+    if cfg.get("store_garde"):
+        info("Reglage garde a la demande : credential.helper store, ~/.git-credentials.")
+        return
+    garde = False
+    if stores:
+        if ask_yn("Retirer le reglage credential.helper store de Git ?", True):
+            for cle in stores:
+                git("config", "--global", "--unset-all", cle, "^store", quiet=True)
+            ok("Reglage retire.")
+        else:
+            garde = True
+    if fichier.exists():
+        if ask_yn(f"Supprimer {fichier}, qui contient ces identifiants en clair ?", True):
+            os.remove(fichier)
+            ok("Fichier supprime.")
+            info("Revoquer aussi les jetons qu'il contenait : https://github.com/settings/tokens")
+        else:
+            garde = True
+    if garde:
+        cfg["store_garde"] = True
+        sauver(cfg)
 
 
 def chemin_gh():
@@ -928,8 +982,8 @@ def demarrer_session(cfg, methode, tok, user):
 def demander_secret(serveur, avec_utilisateur=False):
     """Jeton (ou mot de passe) saisi sans affichage. Il reste en memoire :
     rien n'est ecrit sur le disque. Retourne (utilisateur, secret)."""
-    info(f"Jeton GitHub : https://{serveur}/settings/tokens (de preference un jeton")
-    info("fin, limite aux depots utiles). Il reste en memoire, rien n'est ecrit.")
+    info(f"Jeton GitHub a creer sur https://{serveur}/settings/tokens, de preference")
+    info("un jeton fin limite aux depots utiles. Il reste en memoire, rien n'est ecrit.")
     utilisateur = ask("Nom d'utilisateur, Entree pour un jeton GitHub", "",
                       obligatoire=False) if avec_utilisateur else ""
     try:
@@ -945,23 +999,127 @@ def connexion_jeton(cfg):
     if not tok:
         warn("Aucun jeton saisi.")
         return False
+    return ouvrir_session_memoire(cfg, "jeton", tok)
+
+
+# Connexion par code, gardee en memoire : GitHub App de gitmanager. Le Client ID
+# n'est pas un secret ; la connexion par code ne demande aucun mot de passe de
+# l'application. Les jetons obtenus expirent au bout de 8 heures.
+CLIENT_ID_GITHUB = ""
+APP_GITHUB = ""  # nom de la GitHub App dans son adresse : github.com/apps/<nom>
+
+
+def client_id(cfg):
+    return os.environ.get("GITMANAGER_CLIENT_ID") or cfg.get("client_id") or CLIENT_ID_GITHUB
+
+
+def oublier_connexion_memoire():
+    if SESSION["token"] and SESSION["methode"] in EN_MEMOIRE:
+        SESSION.update(token="", user=None, methode=None)
+        warn("Connexion oubliee apres 15 minutes sans activite.")
+
+
+def _formulaire(url, champs):
+    """POST de formulaire vers GitHub, reponse JSON (connexion par code)."""
+    req = urllib.request.Request(url, data=urllib.parse.urlencode(champs).encode(),
+                                 method="POST", headers={"Accept": "application/json",
+                                                         "User-Agent": "gitmanager"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode("utf-8") or "{}")
+
+
+def ouvrir_session_memoire(cfg, methode, tok):
+    """Verifie le jeton et ouvre une session gardee en memoire seulement."""
     code, user, _ = requete(cfg, "GET", "/user", token=tok)
     if code != 200:
-        err(f"Jeton refuse ({code or 'reseau'}) : {message_api(user)}")
+        err(f"Connexion refusee , code {code or 'reseau'} : {message_api(user)}")
         return False
-    SESSION.update(token=tok, user=user, methode="jeton")
+    SESSION.update(token=tok, user=user, methode=methode)
     cfg["login"] = user.get("login")
     sauver(cfg)
     configurer_identite(cfg, user)
-    ok(f"Connecte a GitHub en tant que {user.get('login')} (jeton en memoire)")
+    ok(f"Connecte a GitHub : {user.get('login')}, connexion gardee en memoire seulement.")
     return True
+
+
+def connexion_par_code(cfg):
+    """Connexion par code : un code a saisir sur github.com/login/device, depuis
+    n'importe quel appareil. Le jeton reste en memoire et expire en 8 heures."""
+    cid, h = client_id(cfg), host(cfg)
+    try:
+        dem = _formulaire(f"https://{h}/login/device/code", {"client_id": cid})
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        err(f"Connexion par code impossible : {getattr(e, 'reason', e)}")
+        return False
+    if "user_code" not in dem:
+        err("Connexion par code refusee : " + str(dem.get("error_description") or dem.get("error")))
+        return False
+    print()
+    info("Ouvrir cette adresse sur n'importe quel appareil, un telephone par exemple :")
+    print(c(f"       {dem['verification_uri']}", "1"))
+    info("puis saisir ce code :")
+    print(c(f"       {dem['user_code']}", "1;33"))
+    info("En attente de la validation, Ctrl+C pour annuler...")
+    intervalle, fin = int(dem.get("interval", 5)), time.time() + int(dem.get("expires_in", 900))
+    while time.time() < fin:
+        time.sleep(intervalle)
+        try:
+            rep = _formulaire(f"https://{h}/login/oauth/access_token", {
+                "client_id": cid, "device_code": dem["device_code"],
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"})
+        except (urllib.error.URLError, OSError, ValueError):
+            continue
+        erreur = rep.get("error")
+        if erreur == "authorization_pending":
+            continue
+        if erreur == "slow_down":
+            intervalle = int(rep.get("interval", intervalle + 5))
+            continue
+        if erreur or not rep.get("access_token"):
+            err("Connexion refusee : " + str(rep.get("error_description") or erreur))
+            return False
+        if not ouvrir_session_memoire(cfg, "code", rep["access_token"]):
+            return False
+        if APP_GITHUB:
+            code, inst, _ = requete(cfg, "GET", "/user/installations")
+            if code == 200 and not inst.get("installations"):
+                warn("L'application gitmanager n'est installee sur aucun compte : l'installer ici,")
+                info(f"https://{h}/apps/{APP_GITHUB}/installations/new")
+        return True
+    err("Code expire : recommencer la connexion.")
+    return False
+
+
+def connexion_memoire(cfg):
+    """Connexion jamais enregistree sur le poste : par code si l'application
+    gitmanager est configuree, sinon par jeton d'acces."""
+    if client_id(cfg):
+        if connexion_par_code(cfg):
+            return True
+        if not ask_yn("Se connecter avec un jeton d'acces a la place ?", True):
+            return False
+    return connexion_jeton(cfg)
+
+
+def connexion_interactive(cfg):
+    """Nouvelle connexion, selon le choix fait pour ce poste."""
+    if "enregistrer_connexion" not in cfg:
+        print()
+        info("Sur un ordinateur perso, la connexion peut rester dans le coffre du systeme.")
+        info("Sur un poste partage ou pro, mieux vaut ne rien enregistrer : la connexion")
+        info("reste alors en memoire et s'efface a la fermeture du programme.")
+        cfg["enregistrer_connexion"] = ask_yn("Enregistrer la connexion sur ce poste ?", False)
+        sauver(cfg)
+    if cfg["enregistrer_connexion"]:
+        return connexion_navigateur(cfg)
+    return connexion_memoire(cfg)
 
 
 def connexion_navigateur(cfg):
     """Connexion interactive : ouvre le navigateur. Retourne True si connecte."""
     methode = methode_dispo(cfg)
     if not methode and not cfg.get("sans_gh"):
-        warn("Aucun outil de connexion par le navigateur (GitHub CLI ou Git Credential Manager).")
+        warn("Aucun outil de connexion par le navigateur : ni GitHub CLI, ni Git Credential Manager.")
         if installer_outil("gh"):
             methode = "gh"
         else:
@@ -995,7 +1153,7 @@ def connexion_navigateur(cfg):
             tok = credential_gcm(cfg, interactif=True)
     code, user, _ = requete(cfg, "GET", "/user", token=tok) if tok else (0, {}, {})
     if code != 200:
-        err(f"Connexion echouee ({code or 'reseau'}) : {user.get('message', 'aucune reponse')}")
+        err(f"Connexion echouee , code {code or 'reseau'} : {user.get('message', 'aucune reponse')}")
         return False
     demarrer_session(cfg, methode, tok, user)
     ok(f"Connecte a GitHub en tant que {user.get('login')}")
@@ -1003,10 +1161,10 @@ def connexion_navigateur(cfg):
 
 
 def assurer_connexion(cfg, interactif=True):
-    """Reutilise la connexion existante, sinon ouvre le navigateur."""
+    """Reutilise la connexion en cours ou enregistree, sinon en demande une."""
     if SESSION["token"]:
         return True
-    methode = methode_dispo(cfg)
+    methode = methode_dispo(cfg) if cfg.get("enregistrer_connexion") else None
     if methode:
         tok = token_silencieux(cfg, methode)
         if tok:
@@ -1015,11 +1173,11 @@ def assurer_connexion(cfg, interactif=True):
                 demarrer_session(cfg, methode, tok, user)
                 return True
             if code == 0:
-                warn(f"GitHub injoignable ({user.get('message')}).")
+                warn(f"GitHub injoignable : {user.get('message')}.")
                 return False
     if not interactif:
         return False
-    return connexion_navigateur(cfg)
+    return connexion_interactive(cfg)
 
 
 def deconnexion(cfg):
@@ -1044,7 +1202,7 @@ def api(cfg, verbe, chemin, data=None):
         if SESSION["methode"] == "gcm":
             oublier_gcm(cfg)
         warn("Session GitHub expiree : reconnexion.")
-        if connexion_navigateur(cfg):
+        if connexion_interactive(cfg):
             code, rep, hdr = requete(cfg, verbe, chemin, data)
     return code, rep, hdr
 
@@ -1059,7 +1217,7 @@ def api_liste(cfg, chemin):
     while url:
         code, rep, hdr = api(cfg, "GET", url)
         if code != 200 or not isinstance(rep, list):
-            err(f"Lecture impossible ({code}) : {message_api(rep)}")
+            err(f"Lecture impossible , code {code} : {message_api(rep)}")
             return None
         tout += rep
         m = re.search(r'<([^>]+)>;\s*rel="next"', hdr.get("Link", "") or "")
@@ -1081,18 +1239,18 @@ def expliquer(sortie):
     s = (sortie or "").lower()
     perso = MODE["nom"] == "perso"
     if "repository not found" in s:
-        return "depot introuvable sur le serveur (supprime, renomme ou pas les droits)"
+        return "depot introuvable sur le serveur : supprime, renomme, ou droits manquants"
     if "permission to" in s and "denied" in s:
         return "ce compte n'a pas le droit d'ecrire dans ce depot"
     if erreur_auth(sortie):
-        return ("GitHub refuse l'acces : se reconnecter (menu Compte GitHub)" if perso else
+        return ("GitHub refuse l'acces : se reconnecter avec le menu Compte GitHub" if perso else
                 "le serveur refuse l'acces : verifier que 'git push' marche dans ce dossier")
     if "publickey" in s:
         return "cle SSH refusee" + (" : relancer pour passer le projet en HTTPS" if perso else "")
     if "could not resolve host" in s or "timed out" in s or "failed to connect" in s:
-        return "serveur injoignable : verifier la connexion (VPN / reseau de l'entreprise ?)"
+        return "serveur injoignable : verifier la connexion, le VPN ou le reseau de l'entreprise"
     if "gh001" in s or "file size limit" in s or "large files" in s:
-        return "un fichier depasse 100 Mo (limite GitHub)"
+        return "un fichier depasse 100 Mo, la limite de GitHub"
     if "rejected" in s:
         return "le serveur a des changements plus recents : relancer l'envoi"
     return derniere_ligne(sortie) or "erreur inconnue"
@@ -1123,14 +1281,14 @@ def nettoyer_depot(chemin, bavard=True):
             git("config", "--local", "--unset", cle[:-len(".remote")] + ".merge",
                 cwd=chemin, quiet=True)
         if bavard:
-            info(f"Suivi de branche repare ({cle.split('.')[1]} -> {cible or 'aucun'}).")
+            info(f"Suivi de branche repare : {cle.split('.')[1]} -> {cible or 'aucun'}.")
     # Nom / email vides en local : ils masquaient la config globale -> commit refuse
     for cle in ("user.name", "user.email"):
         code, val, _ = git("config", "--local", "--get", cle, cwd=chemin, quiet=True)
         if code == 0 and not val.strip():
             git("config", "--local", "--unset-all", cle, cwd=chemin, quiet=True)
             if bavard:
-                info(f"{cle} vide retire du projet (il bloquait les commits).")
+                info(f"{cle} vide retire du projet : il bloquait les commits.")
 
 
 def assurer_identite(cfg, chemin, auto):
@@ -1170,7 +1328,7 @@ def proteger_fichiers(chemin, auto):
     tous = a_retirer + gros_modifies
     if not auto:
         print()
-        warn("Ces fichiers ne devraient pas aller sur le serveur (secret ou > 100 Mo) :")
+        warn("Ces fichiers ne devraient pas aller sur le serveur, secrets ou plus de 100 Mo :")
         for f in tous:
             print("       " + f)
         if not ask_yn("Les exclure de l'envoi et du suivi git ?", True):
@@ -1236,7 +1394,7 @@ def recuperer(cfg, chemin, remote, auto):
         if tentative == 1 and not auto and MODE["nom"] == "perso":
             if est_ssh(url) and ("publickey" in e or "Permission denied" in e
                                  or "Host key" in e):
-                warn("Connexion SSH refusee (aucune cle SSH configuree pour GitHub).")
+                warn("Connexion SSH refusee : aucune cle SSH configuree pour GitHub.")
                 h, o, r = infos_url(url)
                 if o and ask_yn("Passer ce projet en HTTPS, avec connexion par le navigateur ?", True):
                     git("remote", "set-url", remote, f"https://{h}/{o}/{r}.git", cwd=chemin)
@@ -1244,7 +1402,7 @@ def recuperer(cfg, chemin, remote, auto):
             elif erreur_auth(e):
                 warn("GitHub demande une connexion.")
                 SESSION["token"] = ""
-                if connexion_navigateur(cfg):
+                if connexion_interactive(cfg):
                     continue
         raise Arret("erreur", expliquer(e))
 
@@ -1259,7 +1417,7 @@ def integrer(cfg, chemin, remote, branche, auto, pour_envoi=False):
             return branche, 0  # branche pas encore sur le serveur : premier envoi
         if auto:
             raise Arret("ignore", f"le serveur utilise la branche '{defaut}', "
-                                  f"la tienne s'appelle '{branche}' (ouvre le projet)")
+                                  f"celle de ce dossier s'appelle '{branche}' : ouvrir le projet")
         print()
         warn(f"Sur le serveur la branche principale est '{defaut}', ici c'est '{branche}'.")
         print(f"    1. Renommer '{branche}' en '{defaut}' et continuer")
@@ -1330,7 +1488,7 @@ def integrer(cfg, chemin, remote, branche, auto, pour_envoi=False):
 def pousser(cfg, chemin, remote, branche, auto=False):
     """git push (apres integration du serveur). Retourne (statut, detail)."""
     if not auto:
-        info("Verification du serveur (git fetch)...")
+        info("Verification du serveur avec git fetch...")
     recuperer(cfg, chemin, remote, auto)
     branche, recus = integrer(cfg, chemin, remote, branche, auto, pour_envoi=True)
     if not a_des_commits(chemin):
@@ -1353,7 +1511,7 @@ def pousser(cfg, chemin, remote, branche, auto=False):
             break
         if tentative == 1 and not auto and MODE["nom"] == "perso" and erreur_auth(e):
             SESSION["token"] = ""
-            if connexion_navigateur(cfg):
+            if connexion_interactive(cfg):
                 continue
         raise Arret("erreur", expliquer(e))
 
@@ -1366,7 +1524,7 @@ def pousser(cfg, chemin, remote, branche, auto=False):
         if avant:
             info("Les fichiers non listes n'ont pas change. Sur GitHub, chaque fichier")
             info("affiche le dernier commit qui l'a vraiment modifie : c'est normal.")
-    detail = f"{a_envoyer} commit(s) envoye(s) ({bilan_changements(changements)})"
+    detail = f"{a_envoyer} commit(s) envoye(s) : {bilan_changements(changements)}"
     if recus:
         detail += f", {recus} recupere(s)"
     return "ok", detail + (f"  ->  {web}" if web else "")
@@ -1375,7 +1533,7 @@ def pousser(cfg, chemin, remote, branche, auto=False):
 def relier(cfg, chemin):
     if MODE["nom"] == "perso":
         return lier_a_github(cfg, chemin)
-    warn("Ce depot n'a pas d'adresse de serveur (remote).")
+    warn("Ce depot n'a pas d'adresse de serveur, ou remote.")
     url = ask("URL du depot de l'entreprise, https://... ou git@..., vide pour annuler",
               "", obligatoire=False)
     if not url:
@@ -1390,14 +1548,14 @@ def preparer(cfg, chemin, auto, lier=True):
     op = operation_en_cours(chemin)
     if op:
         if auto:
-            raise Arret("ignore", f"{op} en cours (conflit a terminer a la main)")
-        warn(f"Une operation '{op}' est restee en cours (conflit non termine).")
+            raise Arret("ignore", f"{op} en cours : conflit a terminer a la main")
+        warn(f"Une operation '{op}' est restee en cours : conflit non termine.")
         if not ask_yn("L'annuler pour revenir a l'etat d'avant ?", True):
             raise Arret("conflit", f"pour la terminer : git add .  puis  git {op} --continue")
         git(op, "--abort", cwd=chemin)
     branche = branche_courante(chemin)
     if not branche:
-        raise Arret("erreur", "HEAD detachee : se placer sur une branche (git switch main)")
+        raise Arret("erreur", "HEAD detachee : se placer sur une branche avec git switch main")
     remote = remote_principal(chemin)
     if not remote:
         if auto or not lier:
@@ -1413,7 +1571,7 @@ def recuperer_projet(cfg, chemin, auto=False):
     branche, remote = preparer(cfg, chemin, auto, lier=False)
     avant = git("rev-parse", "HEAD", cwd=chemin, quiet=True)[1] if a_des_commits(chemin) else None
     if not auto:
-        info("Recuperation depuis le serveur (git fetch)...")
+        info("Recuperation depuis le serveur avec git fetch...")
     recuperer(cfg, chemin, remote, auto)
     branche, recus = integrer(cfg, chemin, remote, branche, auto)
     if not recus:
@@ -1422,7 +1580,7 @@ def recuperer_projet(cfg, chemin, auto=False):
     if not auto:
         info(f"Recu : {bilan_changements(changements)}")
         afficher_changements(changements, 25)
-    return "ok", f"{recus} commit(s) recupere(s) ({bilan_changements(changements)})"
+    return "ok", f"{recus} commit(s) recupere(s) : {bilan_changements(changements)}"
 
 
 def synchroniser(cfg, chemin, message=None, envoyer=True):
@@ -1562,7 +1720,7 @@ def creer_depot(cfg, nom, prive, org="", description=""):
             if code2 == 200:
                 return rep2.get("clone_url")
         return None
-    err(f"Creation impossible ({code}) : {message_api(rep)}")
+    err(f"Creation impossible , code {code} : {message_api(rep)}")
     return None
 
 
@@ -1575,7 +1733,7 @@ def depot_du_projet(cfg, chemin):
         return None
     code, rep, _ = api(cfg, "GET", f"/repos/{o}/{r}")
     if code != 200:
-        err(f"Depot {o}/{r} introuvable ({code}) : {message_api(rep)}")
+        err(f"Depot {o}/{r} introuvable , code {code} : {message_api(rep)}")
         return None
     return rep
 
@@ -1599,7 +1757,7 @@ def entete_projet(chemin):
     print("  Etat    : " + " | ".join(etat))
     op = operation_en_cours(chemin)
     if op:
-        warn(f"Une operation '{op}' est en cours (conflit non termine).")
+        warn(f"Une operation '{op}' est en cours : conflit non termine.")
 
 
 def voir_modifs(cfg, chemin):
@@ -1684,15 +1842,15 @@ def act_relier(cfg, chemin):
 def act_supprimer_git(cfg, chemin):
     """Supprime le dossier .git (le code reste). Retourne True si fait."""
     dot_git = os.path.join(chemin, ".git")
-    warn("Suppression de l'historique git LOCAL (.git). Les fichiers de code ne sont pas touches.")
+    warn("Suppression de l'historique git LOCAL, le dossier .git. Les fichiers de code ne sont pas touches.")
     info("Le dossier ne sera plus relie a GitHub. Ce qui a deja ete envoye reste sur GitHub.")
     modifs = fichiers_modifies(chemin)
     remote, branche = remote_principal(chemin), branche_courante(chemin)
     ar = avance_retard(chemin, remote, branche) if remote and branche else None
     if modifs or (ar and ar[0]) or (remote and branche and ar is None and a_des_commits(chemin)):
-        warn("Attention : une partie du travail n'est PAS sur GitHub "
-             f"({len(modifs)} fichier(s) non commite(s), "
-             f"{ar[0] if ar else 'des'} commit(s) non envoye(s)).")
+        warn("Attention : une partie du travail n'est PAS sur GitHub : "
+             f"{len(modifs)} fichier(s) non commite(s), "
+             f"{ar[0] if ar else 'des'} commit(s) non envoye(s).")
     if ask("Taper SUPPRIMER en majuscules pour confirmer", "", obligatoire=False) != "SUPPRIMER":
         info("Annule.")
         return False
@@ -1866,7 +2024,7 @@ def act_tout(cfg):
         return
     projets = trouver_projets(dossier)
     if not projets:
-        warn("Aucun projet git trouve dans ce dossier (ni dans ses sous-dossiers).")
+        warn("Aucun projet git trouve dans ce dossier ni dans ses sous-dossiers.")
         return
     print()
     print(c(f"    {'Projet':<28} {'Branche':<12} {'A commiter':>10}  Serveur", "1"))
@@ -1898,7 +2056,7 @@ def act_tout(cfg):
               "ignore": "ignore(s)", "erreur": "en erreur"}
     info("Bilan : " + ", ".join(f"{n} {resume[s]}" for s, n in bilan.items()))
     if bilan.get("conflit"):
-        info("Projets en conflit : les ouvrir (Gerer les depots locaux) et utiliser Envoyer.")
+        info("Projets en conflit : les ouvrir dans Gerer les depots locaux et utiliser Envoyer.")
 
 
 # Depots GitHub : liste, navigation, visibilite, suppression
@@ -1958,7 +2116,7 @@ def ouvrir_explorateur(chemin):
                              start_new_session=True)
         ok(f"Dossier ouvert dans le gestionnaire de fichiers : {chemin}")
     except OSError as e:
-        warn(f"Ouverture du dossier impossible ({e}) : {chemin}")
+        warn(f"Ouverture du dossier impossible, {e} : {chemin}")
 
 
 def menu_depot(cfg, d, locaux):
@@ -2022,7 +2180,7 @@ def parcourir_depot(cfg, d):
             pause()
             return
         if code != 200 or not isinstance(rep, list):
-            err(f"Lecture impossible ({code}) : {message_api(rep)}")
+            err(f"Lecture impossible , code {code} : {message_api(rep)}")
             pause()
             return
         entrees = sorted(rep, key=lambda e: (e.get("type") != "dir", e["name"].lower()))
@@ -2048,13 +2206,13 @@ def parcourir_depot(cfg, d):
             elif e.get("type") == "file":
                 afficher_fichier(cfg, full, e["path"], ref, d)
             else:
-                info(f"{e['name']} : {e.get('type')} (sous-module ou lien), non affichable.")
+                info(f"{e['name']} : {e.get('type')}, sous-module ou lien, non affichable.")
 
 
 def afficher_fichier(cfg, full, chemin, ref, d):
     code, rep, _ = _contenu(cfg, full, chemin, ref)
     if code != 200 or not isinstance(rep, dict):
-        err(f"Lecture impossible ({code}) : {message_api(rep)}")
+        err(f"Lecture impossible , code {code} : {message_api(rep)}")
         return
     print()
     print(c(f"  {chemin}   {taille(rep.get('size'))}", "1"))
@@ -2069,16 +2227,16 @@ def afficher_fichier(cfg, full, chemin, ref, d):
     if rep.get("encoding") == "base64" and rep.get("content"):
         brut = base64.b64decode(rep["content"])
     if brut is None:
-        info("Fichier trop gros pour etre affiche ici (plus de 1 Mo).")
+        info("Fichier trop gros pour etre affiche ici : plus de 1 Mo.")
     elif b"\0" in brut[:8000]:
-        info("Fichier binaire (image, archive...) : non affichable ici.")
+        info("Fichier binaire, image ou archive : non affichable ici.")
     else:
         lignes = brut.decode("utf-8", "replace").splitlines()
         print()
         for i, l in enumerate(lignes[:80], 1):
             print(c(f"  {i:>4} ", "90") + l)
         if len(lignes) > 80:
-            info(f"... {len(lignes) - 80} ligne(s) de plus (o pour tout voir sur GitHub)")
+            info(f"... {len(lignes) - 80} ligne(s) de plus : o pour tout voir sur GitHub")
     if ask("o = ouvrir sur GitHub, Entree = retour", "", obligatoire=False).lower() == "o":
         webbrowser.open(rep.get("html_url") or d["html_url"])
 
@@ -2091,7 +2249,7 @@ def voir_commits(cfg, d):
         pause()
         return
     if code != 200 or not isinstance(rep, list):
-        err(f"Lecture impossible ({code}) : {message_api(rep)}")
+        err(f"Lecture impossible , code {code} : {message_api(rep)}")
         pause()
         return
     while True:
@@ -2113,7 +2271,7 @@ def voir_commits(cfg, d):
 def details_commit(cfg, full, sha):
     code, cm, _ = api(cfg, "GET", f"/repos/{full}/commits/{sha}")
     if code != 200 or not isinstance(cm, dict):
-        err(f"Lecture impossible ({code}) : {message_api(cm)}")
+        err(f"Lecture impossible , code {code} : {message_api(cm)}")
         return
     libelles = {"added": "ajoute", "modified": "modifie", "removed": "supprime",
                 "renamed": "renomme", "changed": "modifie", "copied": "copie"}
@@ -2143,7 +2301,7 @@ def cloner(cfg, d):
         return None
     os.makedirs(parent, exist_ok=True)
     if git_direct("clone", d["clone_url"], dest) != 0:
-        err("Clone echoue (connexion ? droits ?). Reessayer apres le menu Compte GitHub.")
+        err("Clone echoue : verifier la connexion et les droits, puis reessayer apres le menu Compte GitHub.")
         return None
     cfg["dernier_dossier"] = dest
     sauver(cfg)
@@ -2186,18 +2344,18 @@ def changer_visibilite(cfg, d):
         d["private"] = vers_prive
         ok(f"{d['full_name']} est maintenant {'prive' if vers_prive else 'public'}.")
     else:
-        err(f"Echec ({code}) : {message_api(rep)}")
+        err(f"Echec , code {code} : {message_api(rep)}")
 
 
 def supprimer_depot(cfg, d):
-    warn("Suppression DEFINITIVE sur GitHub (code, issues, historique).")
+    warn("Suppression DEFINITIVE sur GitHub : code, issues et historique.")
     info("Les copies sur cet ordinateur ne sont pas touchees.")
     if ask(f"Taper '{d['name']}' pour confirmer", "", obligatoire=False) != d["name"]:
         info("Annule.")
         return False
     code, rep, _ = api(cfg, "DELETE", f"/repos/{d['full_name']}")
     if code == 403 and SESSION["methode"] == "gh":
-        info("GitHub demande une autorisation de plus pour supprimer (delete_repo).")
+        info("GitHub demande une autorisation de plus pour supprimer : delete_repo.")
         info("Le navigateur va s'ouvrir une derniere fois pour l'accorder.")
         p = subprocess.run([chemin_gh(), "auth", "refresh", "-h", host(cfg),
                             "-s", "delete_repo"])
@@ -2212,7 +2370,7 @@ def supprimer_depot(cfg, d):
         info("La page des parametres s'ouvre : tout en bas, 'Delete this repository'.")
         webbrowser.open(d["html_url"] + "/settings")
         return False
-    err(f"Echec ({code}) : {message_api(rep)}")
+    err(f"Echec , code {code} : {message_api(rep)}")
     return False
 
 
@@ -2221,31 +2379,44 @@ def act_compte(cfg):
     assurer_connexion(cfg, interactif=False)
     user = SESSION["user"]
     if user:
-        ok(f"Connecte : {user.get('login')}  via {NOMS_METHODES[SESSION['methode']]}"
-           f"  ({host(cfg)})")
+        ok(f"Connecte : {user.get('login')}, {NOMS_METHODES[SESSION['methode']]}, {host(cfg)}")
     else:
         warn(f"Non connecte a {host(cfg)}.")
+    enregistre = bool(cfg.get("enregistrer_connexion"))
+    info("Connexion enregistree sur ce poste : " + ("oui" if enregistre else "non"))
     print()
-    print("    1. " + ("Se reconnecter / changer de compte" if user else "Se connecter par le navigateur"))
+    print("    1. " + ("Se reconnecter / changer de compte" if user else "Se connecter"))
     print("    2. Se connecter avec un jeton d'acces")
     print("    3. Se deconnecter")
-    print("    4. Changer de serveur GitHub Entreprise")
+    print("    4. " + ("Ne plus enregistrer la connexion sur ce poste" if enregistre
+                      else "Enregistrer la connexion sur ce poste"))
+    print("    5. Changer de serveur GitHub Entreprise")
     print("    0. Retour")
     choix = ask("Choix", "0" if user else "1")
     if choix == "1":
-        SESSION["token"] = ""
-        connexion_navigateur(cfg)
+        SESSION.update(token="", user=None, methode=None)
+        connexion_interactive(cfg)
     elif choix == "2":
         SESSION.update(token="", user=None, methode=None)
         connexion_jeton(cfg)
     elif choix == "3":
         deconnexion(cfg)
     elif choix == "4":
+        cfg["enregistrer_connexion"] = not enregistre
+        sauver(cfg)
+        if enregistre:
+            ok("La connexion ne sera plus enregistree sur ce poste.")
+            if methode_dispo(cfg) and ask_yn("Supprimer la connexion deja enregistree ?", True):
+                SESSION["methode"] = SESSION["methode"] if SESSION["methode"] in ("gh", "gcm") else None
+                deconnexion(cfg)
+        else:
+            ok("La prochaine connexion sera enregistree sur ce poste.")
+    elif choix == "5":
         nouveau = ask("Serveur, par exemple github.com ou github.monentreprise.com", host(cfg))
         cfg["host"] = re.sub(r"^https?://", "", nouveau).strip("/").lower()
         sauver(cfg)
         SESSION.update(token="", user=None, methode=None)
-        connexion_navigateur(cfg)
+        connexion_interactive(cfg)
 
 
 # Ordinateur entreprise : depot recupere depuis GitHub -> depot de l'entreprise
@@ -2297,7 +2468,7 @@ def assurer_acces_entreprise(cible, cwd=None):
         + [("jeton", "Jeton d'acces ou mot de passe")]
     while True:
         print()
-        warn(f"Connexion au serveur de l'entreprise ({serveur}) : seconde authentification,")
+        warn(f"Connexion au serveur de l'entreprise {serveur} : seconde authentification,")
         info("distincte du compte perso.")
         for i, (_, libelle) in enumerate(methodes, 1):
             print(f"    {i}. {libelle}")
@@ -2344,7 +2515,7 @@ def cloner_depot_entreprise(cfg):
         raise Arret("erreur", f"{dest} existe deja et n'est pas vide")
     os.makedirs(parent, exist_ok=True)
     if git_direct("clone", url, dest) != 0:
-        raise Arret("erreur", "clone impossible (adresse ou droits ?)")
+        raise Arret("erreur", "clone impossible : verifier l'adresse et les droits")
     cfg["espace_entreprise"] = parent
     sauver(cfg)
     ok(f"Depot de l'entreprise clone dans {dest}")
@@ -2406,7 +2577,7 @@ def recuperer_source(cfg, url, dossier):
     if not a_des_commits(cible):
         raise Arret("erreur", "le depot recupere est vide")
     _, dernier, _ = git("log", "-1", "--format=%h  %s", cwd=cible, quiet=True)
-    ok(f"Recupere : {cle_depot(url) or url}   (dernier commit {dernier})")
+    ok(f"Recupere : {cle_depot(url) or url}, dernier commit {dernier}")
     return cible, avec_jeton
 
 
@@ -2469,7 +2640,7 @@ def copier_fichier(src, dst, racine):
     """Copie sans jamais ecrire hors du depot (lien symbolique piege)."""
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     if not dans_dossier(os.path.dirname(dst), racine):
-        raise OSError("chemin hors du depot (lien symbolique)")
+        raise OSError("chemin hors du depot, par un lien symbolique")
     if os.path.islink(dst):
         os.remove(dst)
     elif os.path.isfile(dst) and not os.access(dst, os.W_OK):
@@ -2479,7 +2650,7 @@ def copier_fichier(src, dst, racine):
 
 def supprimer_avec_dossiers_vides(fichier, limite):
     if not dans_dossier(os.path.dirname(fichier), limite):
-        raise OSError("chemin hors du depot (lien symbolique)")
+        raise OSError("chemin hors du depot, par un lien symbolique")
     os.remove(fichier)
     d = os.path.dirname(fichier)
     limite = os.path.normcase(os.path.abspath(limite))
@@ -2546,7 +2717,7 @@ def mettre_a_jour_destination(cfg, racine, remote, branche):
         info("Elles partiront avec ce commit.")
         if not ask_yn("Continuer ?", True):
             raise Arret("ignore", "annule")
-    info("Mise a jour de la destination depuis le serveur (git fetch)...")
+    info("Mise a jour de la destination depuis le serveur avec git fetch...")
     recuperer(cfg, racine, remote, auto=False)
     ref = f"refs/remotes/{remote}/{branche}"
     if modifs or not ref_existe(racine, ref):
@@ -2720,7 +2891,7 @@ def menu_perso(cfg):
         print("    2. Gerer les depots locaux")
         print("    3. Compte GitHub")
         print("    0. Retour")
-        choix = input(c("\n  Choix : ", "1;33")).strip()
+        choix = saisie(c("\n  Choix : ", "1;33")).strip()
         if choix in ("0", "q", "quit", "exit"):
             return
         fn = {"1": act_depots, "2": act_depots_locaux, "3": act_compte}.get(choix)
