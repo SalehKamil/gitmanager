@@ -23,6 +23,22 @@ Rien n'est à installer avant : le programme installe lui-même ce qui manque.
    sh gitmanager.sh
    ```
 
+Sur un poste où uv est installé, GITManager s'installe aussi comme une
+commande, disponible depuis n'importe quel dossier, sous Windows, macOS et
+Linux :
+
+```bash
+uv tool install https://github.com/SalehKamil/GITManager/archive/refs/heads/main.zip
+```
+
+Il se lance ensuite en tapant `gitmanager`. Si la commande reste
+introuvable, lancer `uv tool update-shell` puis rouvrir le terminal. La mise
+à jour reprend la même installation :
+
+```bash
+uv tool install --reinstall https://github.com/SalehKamil/GITManager/archive/refs/heads/main.zip
+```
+
 Au premier lancement, le programme installe ce qui manque (Python, Git,
 GitHub CLI) dans la dernière version disponible, puis affiche l'empreinte
 SHA-256 de Git pour la vérifier. Il affiche ensuite le menu principal : taper
