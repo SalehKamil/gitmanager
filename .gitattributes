@@ -1,0 +1,4 @@
+# Fins de ligne fixes : CRLF pour le lanceur Windows, LF pour le lanceur Unix
+*.cmd -text
+*.sh text eol=lf
+*.py text eol=lf

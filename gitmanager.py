@@ -16,9 +16,10 @@ commandes Git par des menus.
 Au premier lancement, il installe ce qui manque (Git, GitHub CLI) dans sa
 derniere version et affiche l'empreinte SHA-256 de Git pour verification.
 
-Lancement :
-    uv run gitmanager.py
-    (ou : python gitmanager.py)
+Lancement, sans rien installer avant :
+    Windows        : double-clic sur gitmanager.cmd
+    macOS, Linux   : sh gitmanager.sh
+    (avec Python 3.9 ou plus deja installe : python gitmanager.py)
 
 Au demarrage : "Que veux-tu faire ?"
 
@@ -703,9 +704,13 @@ def installer_outil(outil, mise_a_jour=False):
         pret = (version_git() or (0, 0)) >= (2, 31)
         if pret:
             afficher_empreinte_git(g)
-    if not pret:
-        warn(f"{nom} n'est pas encore disponible : ferme ce terminal, rouvre-le et "
-             "relance le programme.")
+    if not pret and os.name == "nt":
+        warn(f"{nom} est installe mais pas encore visible : ferme ce terminal, "
+             "rouvre-le et relance le programme.")
+    elif not pret:
+        err(f"L'installation de {nom} avec {g} n'a pas abouti.")
+        info("Installe-le depuis " + ("https://git-scm.com/downloads" if outil == "git"
+                                      else "https://cli.github.com") + ", puis relance.")
     return pret
 
 
@@ -884,27 +889,6 @@ def demarrer_session(cfg, methode, tok, user):
     configurer_identite(cfg, user)
 
 
-def installer_gh():
-    warn("Aucun outil de connexion GitHub trouve (GitHub CLI ou Git Credential Manager).")
-    if os.name == "nt" and shutil.which("winget"):
-        cmd = ["winget", "install", "--id", "GitHub.cli", "-e", "--source", "winget",
-               "--accept-source-agreements", "--accept-package-agreements"]
-    elif sys.platform == "darwin" and shutil.which("brew"):
-        cmd = ["brew", "install", "gh"]
-    else:
-        info("Connexion par le navigateur : installe GitHub CLI (https://cli.github.com,")
-        info("Ubuntu / Debian : sudo apt install gh) puis relance le script.")
-        return None
-    if not ask_yn("Installer GitHub CLI maintenant ?", True):
-        return None
-    subprocess.run(cmd)
-    if chemin_gh():
-        ok("GitHub CLI installe.")
-        return "gh"
-    warn("Installation terminee : ferme ce terminal, rouvre-le et relance le script.")
-    return None
-
-
 def demander_secret(serveur, avec_utilisateur=False):
     """Jeton (ou mot de passe) saisi sans affichage. Il reste en memoire :
     rien n'est ecrit sur le disque. Retourne (utilisateur, secret)."""
@@ -939,7 +923,11 @@ def connexion_jeton(cfg):
 
 def connexion_navigateur(cfg):
     """Connexion interactive : ouvre le navigateur. Retourne True si connecte."""
-    methode = methode_dispo(cfg) or installer_gh()
+    methode = methode_dispo(cfg)
+    if not methode:
+        warn("Aucun outil de connexion par le navigateur (GitHub CLI ou Git Credential Manager).")
+        if installer_outil("gh"):
+            methode = "gh"
     if not methode:
         if ask_yn("Se connecter avec un jeton d'acces a la place ?", True):
             return connexion_jeton(cfg)
@@ -2609,6 +2597,10 @@ def menu_perso(cfg):
 
 
 def main():
+    if sys.version_info < (3, 9):
+        print("GITManager demande Python 3.9 ou plus : lance-le avec gitmanager.cmd "
+              "(Windows) ou gitmanager.sh (macOS, Linux).")
+        sys.exit(1)
     cfg = charger()
     migrer_ancienne_config(cfg)
     if not preparer_outils(cfg):

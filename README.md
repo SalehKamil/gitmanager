@@ -18,8 +18,8 @@ bonnes commandes à ta place.
 
 ## Comment l'utiliser
 
-Il te faut seulement Python 3.9 ou plus récent. Tu peux aussi installer uv,
-un outil qui télécharge Python tout seul.
+Tu n'as rien à installer avant : le programme installe lui-même ce qui
+manque.
 
 1. Récupère le projet. Sur la page GitHub du projet, clique sur Code, puis
    sur Download ZIP, et décompresse le fichier. Si Git est déjà installé, tu
@@ -29,22 +29,17 @@ un outil qui télécharge Python tout seul.
    git clone https://github.com/SalehKamil/GITManager.git
    ```
 
-2. Ouvre un terminal dans le dossier du projet et lance le programme :
+2. Lance le programme. Sous Windows, double-clique sur `gitmanager.cmd`. Sur
+   macOS ou Linux, ouvre un terminal dans le dossier du projet et tape :
 
    ```bash
-   uv run gitmanager.py
+   sh gitmanager.sh
    ```
 
-   Ou, si tu utilises Python directement :
-
-   ```bash
-   python gitmanager.py
-   ```
-
-Au premier lancement, le programme vérifie que Git est installé, ainsi qu'un
-outil pour te connecter à GitHub par le navigateur, comme GitHub CLI. S'il en
-manque un, le programme te propose de l'installer dans sa dernière version
-disponible.
+Au premier lancement, le lanceur installe Python s'il manque. Le programme
+vérifie ensuite que Git est installé, ainsi qu'un outil pour te connecter à
+GitHub par le navigateur, comme GitHub CLI. S'il en manque un, il te propose
+de l'installer dans sa dernière version disponible.
 
 Après l'installation de Git, le programme affiche son empreinte SHA-256.
 C'est une suite de chiffres et de lettres qui permet de vérifier que le
