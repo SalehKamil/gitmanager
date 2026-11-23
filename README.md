@@ -2,11 +2,6 @@
 
 <h1 align="center">GITManager</h1>
 
-<p align="center">
-  Code chez toi, pousse au bureau, et gère tes dépôts GitHub en local comme en ligne.<br>
-  Code at home, push at work, and manage your GitHub repos locally and online.
-</p>
-
 Ton entreprise n'autorise pas le transfert de fichiers. Tu voudrais pourtant
 travailler sur tes projets depuis ton ordinateur perso, plus confortable,
 puis les envoyer sur ton ordinateur pro. Ou tu veux simplement gérer tes
