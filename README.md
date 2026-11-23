@@ -43,8 +43,8 @@ sudo apt install git gh           # Debian, Ubuntu
 1. Récupérer le script :
 
    ```bash
-   git clone https://github.com/SalehKamil/gitmanager.git
-   cd gitmanager
+   git clone https://github.com/SalehKamil/GITManager.git
+   cd GITManager
    ```
 
 2. Le lancer :
