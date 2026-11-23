@@ -19,7 +19,10 @@ derniere version et affiche l'empreinte SHA-256 de Git pour verification.
 Lancement, sans rien installer avant :
     Windows        : double-clic sur gitmanager.cmd
     macOS, Linux   : sh gitmanager.sh
-    (avec Python 3.9 ou plus deja installe : python gitmanager.py)
+    (avec uv : uv run gitmanager.py ; avec Python 3.9 ou plus : python gitmanager.py)
+
+Commande gitmanager sur n'importe quel poste (avec uv) :
+    uv tool install https://github.com/SalehKamil/GITManager/archive/refs/heads/main.zip
 
 Au demarrage : "Que veux-tu faire ?"
 
@@ -2621,8 +2624,13 @@ def main():
     print("\n  A bientot.\n")
 
 
-if __name__ == "__main__":
+def point_entree():
+    """Commande `gitmanager` (installee avec : uv tool install ...)."""
     try:
         main()
     except (KeyboardInterrupt, EOFError):
         print("\n\n  Interrompu.\n")
+
+
+if __name__ == "__main__":
+    point_entree()

@@ -1,0 +1,21 @@
+[project]
+name = "gitmanager"
+version = "1.0.0"
+description = "Code chez toi, pousse au bureau, et gere tes depots GitHub en local comme en ligne."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+gitmanager = "gitmanager:point_entree"
+
+[project.urls]
+Source = "https://github.com/SalehKamil/GITManager"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["gitmanager"]
