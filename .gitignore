@@ -5,3 +5,10 @@ venv/
 .env
 .DS_Store
 Thumbs.db
+
+# Images et figures : gardees hors du depot
+docs/
+images/
+img/
+figures/
+figure/

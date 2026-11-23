@@ -4,7 +4,17 @@
 # dependencies = []
 # ///
 """
-gitmanager.py : gestionnaire Git / GitHub interactif.
+gitmanager.py : Code chez toi, pousse au bureau, et gere tes depots GitHub
+en local comme en ligne.
+
+Ton entreprise n'autorise pas le transfert de fichiers. Tu voudrais pourtant
+travailler sur tes projets depuis ton ordinateur perso, plus confortable, puis
+les envoyer sur ton ordinateur pro. Ou tu veux simplement gerer tes depots
+GitHub, sur ta machine comme en ligne. GITManager sert a ca : il remplace les
+commandes Git par des menus.
+
+Au premier lancement, il installe ce qui manque (Git, GitHub CLI) dans sa
+derniere version et affiche l'empreinte SHA-256 de Git pour verification.
 
 Lancement :
     uv run gitmanager.py
@@ -30,6 +40,7 @@ jeton ecrit sur le disque, dans une URL ni sur la ligne de commande.
 import base64
 import filecmp
 import getpass
+import hashlib
 import json
 import os
 import re
@@ -42,7 +53,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 CONFIG = Path.home() / ".gitmanager.json"
@@ -313,21 +324,6 @@ def git_direct(*args, cwd=None):
                           env=_env_git()).returncode
 
 
-def git_ok():
-    if shutil.which("git"):
-        _, out, _ = git("--version", quiet=True)
-        m = re.search(r"(\d+)\.(\d+)", out)
-        if m and (int(m.group(1)), int(m.group(2))) >= (2, 31):
-            return True
-        err(f"Git 2.31 ou plus est requis ({out or 'version inconnue'}).")
-    else:
-        err("git est introuvable dans le PATH.")
-    info("Windows : winget install --id Git.Git -e")
-    info("macOS   : xcode-select --install")
-    info("Linux   : sudo apt install git")
-    return False
-
-
 def derniere_ligne(texte):
     lignes = [l.strip() for l in (texte or "").splitlines()
               if l.strip() and not BRUIT_GIT.search(l)]
@@ -542,6 +538,207 @@ def api_base(cfg):
 def run(cmd, entree=None, env=None):
     return subprocess.run(cmd, input=entree, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env)
+
+
+# Installation des outils : Git (derniere version) et GitHub CLI
+
+NOMS_OUTILS = {"git": "Git", "gh": "GitHub CLI"}
+PAQUETS = {
+    "git": {"winget": "Git.Git", "brew": "git", "apt-get": "git", "dnf": "git",
+            "pacman": "git", "zypper": "git"},
+    "gh": {"winget": "GitHub.cli", "brew": "gh", "apt-get": "gh", "dnf": "gh",
+           "pacman": "github-cli", "zypper": "gh"},
+}
+VERIF_GIT_JOURS = 7  # recherche d'une nouvelle version de Git une fois par semaine
+
+
+def gestionnaire_paquets():
+    """Gestionnaire de paquets du systeme. Il verifie lui-meme la signature ou
+    l'empreinte de ce qu'il telecharge."""
+    if os.name == "nt":
+        candidats = ("winget",)
+    elif sys.platform == "darwin":
+        candidats = ("brew",)
+    else:
+        candidats = ("apt-get", "dnf", "pacman", "zypper")
+    return next((g for g in candidats if shutil.which(g)), None)
+
+
+def commandes_paquet(g, paquet, mise_a_jour=False):
+    """Commandes qui installent (ou mettent a jour) la derniere version d'un paquet."""
+    sudo = [] if os.name == "nt" or g == "brew" or os.geteuid() == 0 else ["sudo"]
+    if g == "winget":
+        return [["winget", "upgrade" if mise_a_jour else "install", "--id", paquet, "-e",
+                 "--source", "winget", "--accept-source-agreements",
+                 "--accept-package-agreements"]]
+    if g == "brew":
+        return [["brew", "install", paquet]]  # installe, ou met a jour si deja la
+    if g == "apt-get":
+        return [sudo + ["apt-get", "update"], sudo + ["apt-get", "install", "-y", paquet]]
+    if g == "dnf":
+        return [sudo + ["dnf", "upgrade" if mise_a_jour else "install", "-y", paquet]]
+    if g == "pacman":
+        return [sudo + ["pacman", "-S", "--noconfirm", "--needed", paquet]]
+    if g == "zypper":
+        return [sudo + ["zypper", "--non-interactive", "install", paquet]]
+    return []
+
+
+def version_git():
+    """(majeur, mineur) de Git, ou None s'il n'est pas installe."""
+    if not shutil.which("git"):
+        return None
+    m = re.search(r"(\d+)\.(\d+)", run(["git", "--version"]).stdout)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+def actualiser_path():
+    """Juste apres une installation sous Windows, le PATH du terminal n'est pas a jour."""
+    if os.name != "nt":
+        return
+    for d in (os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "cmd"),
+              os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Git", "cmd")):
+        if os.path.isdir(d) and d not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+
+
+def _sortie(cmd):
+    """Sortie d'une commande d'information, sans bloquer plus d'une minute."""
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=60)
+        return p.returncode, p.stdout
+    except (OSError, subprocess.SubprocessError):
+        return -1, ""
+
+
+def empreinte_fichier(chemin):
+    h = hashlib.sha256()
+    with open(chemin, "rb") as f:
+        for bloc in iter(lambda: f.read(1 << 20), b""):
+            h.update(bloc)
+    return h.hexdigest()
+
+
+def empreinte_paquet(g):
+    """Empreinte SHA-256 du paquet Git, celle que le gestionnaire a verifiee."""
+    if g == "winget":
+        _, out = _sortie(["winget", "show", "--id", "Git.Git", "-e", "--source", "winget",
+                          "--accept-source-agreements"])
+        m = re.search(r"\b[0-9A-Fa-f]{64}\b", out)
+        return m.group(0).lower() if m else ""
+    if g == "apt-get":
+        _, version = _sortie(["dpkg-query", "-W", "-f=${Version}", "git"])
+        _, out = _sortie(["apt-cache", "show", "git"])
+        for bloc in out.split("\n\n"):
+            if version.strip() and f"\nVersion: {version.strip()}\n" in f"\n{bloc}\n":
+                m = re.search(r"^SHA256: ([0-9a-f]{64})$", bloc, re.M)
+                return m.group(1) if m else ""
+    return ""
+
+
+def afficher_empreinte_git(g):
+    """Version installee et empreintes SHA-256, pour verifier l'installation."""
+    _, version, _ = git("--version", quiet=True)
+    ok(f"{version} est installe.")
+    paquet = empreinte_paquet(g)
+    if paquet:
+        info(f"Empreinte SHA-256 du paquet, verifiee par {g} :")
+        print(f"       {paquet}")
+        if g == "winget":
+            info("A comparer avec https://github.com/git-for-windows/git/releases")
+    exe = shutil.which("git")
+    if exe:
+        info("Empreinte SHA-256 du programme git installe :")
+        print(f"       {empreinte_fichier(os.path.realpath(exe))}")
+
+
+def mise_a_jour_git_dispo(g):
+    """True si le gestionnaire de paquets propose une version plus recente de Git."""
+    if g == "winget":
+        code, out = _sortie(["winget", "list", "--id", "Git.Git", "-e",
+                             "--upgrade-available", "--accept-source-agreements"])
+        return code == 0 and "Git.Git" in out
+    if g == "brew":
+        return "git" in _sortie(["brew", "outdated", "--quiet", "--formula"])[1].split()
+    if g == "apt-get":
+        return any(l.startswith("git/") for l in
+                   _sortie(["apt", "list", "--upgradable"])[1].splitlines())
+    if g == "dnf":
+        return _sortie(["dnf", "-q", "check-update", "git"])[0] == 100
+    if g == "pacman":
+        return _sortie(["pacman", "-Qu", "git"])[0] == 0
+    if g == "zypper":
+        return bool(re.search(r"\|\s*git\s*\|", _sortie(["zypper", "-q", "list-updates"])[1]))
+    return False
+
+
+def installer_outil(outil, mise_a_jour=False):
+    """Installe ou met a jour un outil avec le gestionnaire de paquets du systeme.
+    Retourne True si l'outil est pret."""
+    nom = NOMS_OUTILS[outil]
+    g = gestionnaire_paquets()
+    if not g:
+        if outil == "git" and sys.platform == "darwin":
+            info("Les outils de developpement d'Apple contiennent Git (une fenetre s'ouvre).")
+            if ask_yn("Les installer maintenant ?", True):
+                subprocess.run(["xcode-select", "--install"])
+                info("Relance le programme quand l'installation est terminee.")
+            return False
+        info(f"Installe {nom} depuis " + ("https://git-scm.com/downloads" if outil == "git"
+                                         else "https://cli.github.com") + ", puis relance.")
+        return False
+    verbe = "Mettre a jour" if mise_a_jour else "Installer"
+    if not ask_yn(f"{verbe} {nom} (derniere version disponible) avec {g} ?", True):
+        return False
+    for cmd in commandes_paquet(g, PAQUETS[outil][g], mise_a_jour):
+        print(c("  $ " + " ".join(cmd), "90"))
+        subprocess.run(cmd)
+    actualiser_path()
+    if outil == "gh":
+        pret = bool(chemin_gh())
+        if pret:
+            ok("GitHub CLI est installe.")
+    else:
+        pret = (version_git() or (0, 0)) >= (2, 31)
+        if pret:
+            afficher_empreinte_git(g)
+    if not pret:
+        warn(f"{nom} n'est pas encore disponible : ferme ce terminal, rouvre-le et "
+             "relance le programme.")
+    return pret
+
+
+def preparer_outils(cfg):
+    """Au premier lancement, installe ce qui manque pour que tout soit pret.
+    Ensuite, une fois par semaine, propose la derniere version de Git."""
+    version = version_git()
+    aujourd_hui = date.today()
+    if version is None or version < (2, 31):
+        warn("Git n'est pas installe." if version is None else
+             f"Git {version[0]}.{version[1]} est trop ancien : il faut la version 2.31 ou plus.")
+        if not installer_outil("git", mise_a_jour=version is not None):
+            return False
+        cfg["verif_git"] = aujourd_hui.isoformat()
+    else:
+        try:
+            ecart = (aujourd_hui - date.fromisoformat(cfg.get("verif_git", ""))).days
+        except ValueError:
+            ecart = VERIF_GIT_JOURS
+        g = gestionnaire_paquets()
+        if ecart >= VERIF_GIT_JOURS and g:
+            cfg["verif_git"] = aujourd_hui.isoformat()
+            sauver(cfg)
+            info("Recherche d'une nouvelle version de Git...")
+            if mise_a_jour_git_dispo(g):
+                warn("Une nouvelle version de Git est disponible.")
+                installer_outil("git", mise_a_jour=True)
+    if not chemin_gh() and not helper_gcm() and not cfg.get("sans_gh"):
+        info("GitHub CLI sert a se connecter a GitHub par le navigateur.")
+        if not installer_outil("gh"):
+            cfg["sans_gh"] = True  # ne plus le proposer : un jeton reste possible
+    sauver(cfg)
+    return True
 
 
 def chemin_gh():
@@ -2365,6 +2562,9 @@ def lancer(fn, cfg, avec_pause=True):
 
 def choisir_fonction(cfg):
     titre("GITMANAGER")
+    print(c("    Code chez toi, pousse au bureau, et gere tes depots GitHub", "36"))
+    print(c("    en local comme en ligne.", "36"))
+    print()
     print("    Que veux-tu faire ?")
     print()
     print("    1. Gerer et parcourir tes depots GitHub   (ordinateur perso)")
@@ -2409,10 +2609,10 @@ def menu_perso(cfg):
 
 
 def main():
-    if not git_ok():
-        sys.exit(1)
     cfg = charger()
     migrer_ancienne_config(cfg)
+    if not preparer_outils(cfg):
+        sys.exit(1)
     try:
         while True:
             mode = choisir_fonction(cfg)
