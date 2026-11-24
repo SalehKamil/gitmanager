@@ -96,7 +96,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.8.0"
+__version__ = "2.8.1"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -1520,7 +1520,11 @@ def verifier_gardes(cfg, demarrage=False, fin=False):
         SESSION.update(token="", user=None, methode=None)
         print()
         warn(f"Compte GitHub {nom_compte()} {login or ''} : fin du temps de garde sur cette machine.")
-        supprimer_compte(cfg, login)
+        voir, VOIR_GIT["actif"] = VOIR_GIT["actif"], False  # une seule ligne, sans les commandes
+        try:
+            supprimer_compte(cfg, login, silencieux=True)
+        finally:
+            VOIR_GIT["actif"] = voir
         if nom == actif:
             NAVIGATION["menu_principal"] = True
     activer_profil(actif)
@@ -1657,7 +1661,7 @@ def retirer_helper(serveur, motif):
             git("config", "--global", "--unset-all", cle_git, re.escape(motif), quiet=True)
 
 
-def supprimer_compte(cfg, login=None):
+def supprimer_compte(cfg, login=None, silencieux=False):
     """Supprime de cette machine toutes les traces du compte actif : cles de
     GitHub CLI et de Git Credential Manager, identifiants en clair, identite des
     commits ecrite par gitmanager, reglages du compte dans gitmanager."""
@@ -1715,9 +1719,9 @@ def supprimer_compte(cfg, login=None):
         warn("Ces traces du compte restent sur cette machine :")
         for t in restes:
             warn(f"  - {t}")
-    else:
+    elif not silencieux:
         ok(f"Compte {login or ''} : plus aucune trace sur cette machine.".replace("  ", " "))
-    if methode or login:
+    if (methode or login) and not silencieux:
         info("Sur GitHub, les autorisations restent visibles ici, pour les retirer :")
         info(f"https://{h}/settings/applications et https://{h}/settings/tokens")
     return not restes
