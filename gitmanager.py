@@ -42,11 +42,14 @@ separes. Les textes du programme evitent les mots qui prennent un accent.
        fin de session.
 
   2. Entreprise, connexion au compte GitHub de l'entreprise
-     - Importer un repo GitHub par son URL, sans connexion s'il est public,
-       avec le compte perso sinon ; ouverture publique de 2 minutes au plus
-       pour le clone, avec accord. Puis envoi dans un repo GitHub de
+     - Importer un repo GitHub par son URL, compte/nom ou un dossier de la
+       machine. Une copie du repo deja sur la machine sert sans connexion au
+       compte perso ; sinon, sans connexion s'il est public, avec le compte
+       perso pour un repo non public ; ouverture publique de 2 minutes au
+       plus pour le clone, avec accord. Puis envoi dans un repo GitHub de
        l'entreprise : ajouter, sans rien enlever, ou remplacer. L'envoi passe
-       par une copie du repo de l'entreprise sur le Bureau, qui reste.
+       par la copie du repo de l'entreprise sur la machine, ou par une copie
+       sur le Bureau, qui reste.
      - Repos GitHub de l'entreprise : les choix de l'option 1.
 
   3. Se connecter, pour un compte sans session.
@@ -99,7 +102,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.10.0"
+__version__ = "2.11.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -4021,12 +4024,30 @@ def import_prive(cfg, url, dossier):
 def importer_repo(cfg, dossier):
     """Import d'un repo GitHub par son URL, sans identifiants s'il est public.
     Retourne (dossier du projet importe, nom du repo)."""
-    saisie = ask("URL du repo GitHub pour l'import, ou compte/nom, Enter pour revenir",
-                 obligatoire=False)
+    saisie = ask("Repo pour l'import : URL GitHub, compte/nom ou dossier sur cette machine, "
+                 "Enter pour revenir", obligatoire=False)
     if not saisie:
         return None, None
     url = url_source(saisie)
+    if os.path.isdir(url):  # dossier de cette machine : aucune connexion
+        return importer_local(url, dossier)
     nom = cle_depot(url) or os.path.basename(url.rstrip("/\\")).removesuffix(".git")
+    copie = copie_locale_de(cfg, url)
+    if copie:
+        _, dernier, _ = git("log", "-1", "--format=%h, %cd : %s", "--date=format:%Y-%m-%d %H:%M",
+                            cwd=copie, quiet=True)
+        print()
+        info(f"Copie de {nom} sur cette machine : {copie}")
+        info(f"Dernier commit de cette copie : {dernier or 'aucun'}")
+        print()
+        print("    1. Utiliser cette copie, sans connexion au compte perso")
+        print("    2. Importer depuis GitHub")
+        print("    0. Retour")
+        choix = ask("Choix", "1")
+        if choix == "1":
+            return importer_local(copie, dossier, nom)
+        if choix != "2":
+            return None, None
     cible = os.path.join(dossier, "projet")
     info(f"Import de {url_web(url) or url}...")
     code, _, e = git("clone", "--depth", "1", "--no-tags", "--quiet", url, cible,
@@ -4042,6 +4063,39 @@ def importer_repo(cfg, dossier):
         cible = import_prive(cfg, url, dossier)
     _, dernier, _ = git("log", "-1", "--format=%h  %s", cwd=cible, quiet=True)
     ok(f"Import OK : {nom}, dernier commit {dernier}")
+    return cible, nom
+
+
+def copie_locale_de(cfg, url):
+    """Copie de ce repo sur cette machine, trouvee par son adresse en ligne, ou None."""
+    cle_cherchee = (cle_depot(url) or "").lower()
+    if not cle_cherchee:
+        return None
+    projets = projets_de_la_machine(cfg)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for p, urls in zip(projets, pool.map(urls_remotes, projets)):
+            if any((cle_depot(u) or "").lower() == cle_cherchee for u in urls.values()):
+                return p
+    return None
+
+
+def importer_local(chemin, dossier, nom=None):
+    """Import depuis un dossier de cette machine, sans connexion : le dernier commit
+    d'un repo git, ou les fichiers d'un dossier sans git."""
+    nom = nom or os.path.basename(os.path.normpath(chemin))
+    if racine_repo(chemin) is None:
+        ok(f"Import OK : {nom}, fichiers du dossier {chemin}")
+        return chemin, nom
+    modifs = fichiers_modifies(chemin)
+    if modifs:
+        warn(f"{len(modifs)} fichier(s) sans commit dans cette copie : ils ne font pas partie "
+             "de l'import.")
+    cible = os.path.join(dossier, "projet")
+    code, _, e = git("clone", "--quiet", "--no-hardlinks", chemin, cible, quiet=True)
+    if code != 0:
+        raise Arret("erreur", "import impossible : " + expliquer(e))
+    _, dernier, _ = git("log", "-1", "--format=%h  %s", cwd=cible, quiet=True)
+    ok(f"Import OK : {nom}, dernier commit {dernier}, depuis cette machine")
     return cible, nom
 
 
@@ -4085,7 +4139,12 @@ def envoyer_vers_entreprise(cfg, source):
     mode = ask("Choix", "0")
     if mode not in ("1", "2"):
         return "retour"
-    copie = copie_sur_bureau(url, nom)
+    existante = copie_locale_de(cfg, url)
+    if existante and ask_yn(f"Copie de ce repo sur cette machine : {existante}. L'utiliser pour "
+                            "l'envoi ?", True):
+        copie = existante
+    else:
+        copie = copie_sur_bureau(url, nom)
     branche, remote = preparer(cfg, copie, auto=False)
     mettre_a_jour_destination(cfg, copie, remote, branche)
     if not remplacer_contenu(source, copie, supprimer=mode == "2"):
@@ -4093,7 +4152,7 @@ def envoyer_vers_entreprise(cfg, source):
     print()
     fait = committer(cfg, copie, proposer_gitignore=False)
     statut, detail = pousser(cfg, copie, remote, branche, commit_affiche=fait > 0)
-    info(f"La copie locale reste sur le Bureau : {copie}")
+    info(f"La copie locale reste ici : {copie}")
     return statut, detail
 
 

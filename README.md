@@ -129,9 +129,13 @@ Connexion au compte GitHub perso.
 
 Connexion au compte GitHub de l'entreprise.
 
-1. Importer un repo GitHub : saisir son URL. Un repo public s'importe sans
-   connexion.
-   - Repo non public : connexion au compte GitHub perso le temps de l'import.
+1. Importer un repo GitHub : saisir son URL, compte/nom, ou un dossier de la
+   machine. Un repo public s'importe sans connexion.
+   - Copie du repo sur la machine : le programme la trouve et propose de
+     l'utiliser, sans connexion au compte perso ; seul son dernier commit
+     part, les fichiers sans commit restent.
+   - Repo non public, sans copie sur la machine : connexion au compte GitHub
+     perso le temps de l'import.
    - Ouverture : avec accord, le repo devient public le temps du clone, puis
      redevient non public au bout de deux minutes, ou tout de suite avec
      Enter. Le programme signale avant les fichiers secrets qu'il contient.
@@ -141,9 +145,9 @@ Connexion au compte GitHub de l'entreprise.
      liste, ou U pour saisir son URL.
    - Ajouter au repo, sans rien enlever.
    - Remplacer le repo par le projet : historique gardé.
-   - Copie sur le Bureau : avant l'envoi, le repo de l'entreprise est copié
-     sur le Bureau, sous Windows, macOS ou Linux. La copie reste après
-     l'envoi.
+   - Copie du repo de l'entreprise : si elle existe déjà sur la machine, le
+     programme propose de l'utiliser ; sinon, il la fait sur le Bureau, sous
+     Windows, macOS ou Linux. La copie reste après l'envoi.
 2. Repos GitHub de l'entreprise : les mêmes choix que l'option 1, avec le
    compte de l'entreprise.
 
