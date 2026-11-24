@@ -36,74 +36,81 @@ Au lancement, le programme affiche son logo et son accroche. Il installe Git
 s'il manque, dans la dernière version disponible, et affiche son empreinte
 SHA-256 pour la vérifier.
 
-Chaque option demande d'abord la connexion à son compte GitHub : le compte
-perso pour l'option 1, le compte de l'entreprise pour l'option 2. Les deux
-comptes restent séparés. Sans connexion, le programme revient au menu
+Un compte gardé sur la machine ouvre sa session tout seul au démarrage.
+Sinon, chaque option demande d'abord la connexion à son compte GitHub : le
+compte perso pour l'option 1, le compte de l'entreprise pour l'option 2. Les
+deux comptes restent séparés. Sans connexion, le programme revient au menu
 principal.
 
 La connexion propose deux moyens :
 
-1. Par le navigateur : le compte est enregistré sur la machine. Un
-   avertissement le rappelle avant la connexion.
-2. Par jeton d'accès : la connexion reste en mémoire.
+1. Par le navigateur : le compte reste sur la machine. Un avertissement le
+   rappelle avant la connexion.
+2. Par jeton : la connexion reste dans la session, jamais sur le disque.
 
-Une connexion gardée en mémoire s'efface à la fermeture du programme et après
-15 minutes sans activité. Quand une action demande une permission que le jeton
-n'a pas, le programme la nomme : une fois ajoutée sur GitHub, elle s'applique
-au nouvel essai, sans reconnexion.
+Une connexion par jeton s'efface à la fermeture du programme et après 15
+minutes sans action. Quand une action demande une permission que le jeton n'a
+pas, le programme la nomme : une fois ajoutée sur GitHub, elle compte au
+nouvel essai, sans nouvelle connexion.
 
 Le menu principal propose aussi, sous les deux options :
 
-3. Se connecter : au compte perso ou à celui de l'entreprise. Avec un compte
-   connecté, ce choix devient Changer de moyen de connexion.
-4. Se déconnecter : seulement avec un compte connecté. Le programme demande
-   ensuite quoi faire du compte enregistré sur la machine.
-   - Le garder : la prochaine connexion par le navigateur le réutilise.
-   - Le supprimer : clés de connexion, identifiants en clair, identité des
-     commits et réglages du compte sont effacés. Aucune trace ne reste sur la
-     machine.
+3. Se connecter : au compte perso ou à celui de l'entreprise. Avec une
+   session ouverte, ce choix devient Changer de moyen de connexion.
+4. Fermer la session : seulement avec une session ouverte. Le programme
+   demande ensuite quoi faire du compte sur la machine.
+   - Garder le compte : la prochaine connexion par le navigateur le
+     réutilise.
+   - Supprimer le compte, sans trace : connexion enregistrée, identifiants en
+     clair, nom et email des commits et réglages du compte sont effacés.
+5. Voir les commandes Git : chaque commande qui change un repo s'affiche avec
+   sa sortie, `git add`, `git commit`, `git push`, `git pull` et les autres.
+   Le même choix les cache.
 
-Un compte enregistré mais non connecté se supprime avec le choix Supprimer
-le compte enregistré sur cette machine.
+Un compte gardé sur la machine, sans session ouverte, se supprime avec le
+choix Supprimer le compte de cette machine.
 
-Dans chaque menu, Entrée revient en arrière d'un niveau ; au menu principal,
-Entrée quitte le programme.
+Dans chaque menu, Enter revient en arrière d'un niveau ; au menu principal,
+Enter quitte le programme.
 
-### Option 1 : gérer les repos GitHub
+### Option 1 : repos GitHub perso
 
 Connexion au compte GitHub perso.
 
 1. Repos GitHub en ligne : la liste des repos sur GitHub, avec une
    recherche par nom ; le numéro d'un repo l'ouvre.
    - Parcourir les fichiers et voir les commits.
-   - Rendre public ou privé.
+   - Rendre public ou non public.
    - Ouvrir la copie sur cette machine : le dossier s'ouvre dans le
      gestionnaire de fichiers du système et son menu dans le terminal.
    - Cloner le projet en local, quand aucune copie n'existe.
    - Ouvrir la copie en ligne : la page du repo dans le navigateur.
-   - Comparer la copie en ligne et la copie sur cette machine : un tableau à
-     deux colonnes, en ligne et en local, avec la date du dernier commit, la
-     copie la plus récente, les commits en avance, les fichiers et leur
-     taille ; puis les fichiers différents, avec la version la plus récente
-     en vert ; puis les deux versions d'un fichier côte à côte.
-   - Voir les accès à ce repo : le rôle du compte et ses droits.
-   - Supprimer.
+   - Comparer en ligne et en local : un tableau à deux colonnes, en ligne et
+     en local, avec la date du dernier commit, la copie la plus neuve, les
+     commits en avance, les fichiers et leur taille ; puis les fichiers avec
+     changements, la version la plus neuve en vert ; puis les deux versions
+     d'un fichier, côte à côte.
+   - Voir les droits sur ce repo : le rôle du compte et ses droits.
+   - Supprimer de GitHub.
    - C : changer de compte.
-   - D : se déconnecter, en gardant ou en supprimant le compte enregistré.
-2. Repos GitHub en local : la liste des repos trouvés sur l'ordinateur.
-   - Envoyer : commit et push.
-   - Mettre à jour : pull.
-   - Écraser : force push, GitHub prend le contenu du dossier.
+   - D : fermer la session, en gardant ou en supprimant le compte.
+2. Repos GitHub en local : la liste des repos trouvés sur la machine.
+   - Envoyer : commit + push ; le programme demande le message du commit,
+     Enter garde le message proposé.
+   - Recevoir : pull.
+   - Remplacer GitHub par ce dossier : force push.
+   - Voir les changements.
    - Ouvrir la copie sur cette machine : le dossier dans le gestionnaire de
      fichiers du système.
    - Ouvrir la copie en ligne : la page du repo dans le navigateur.
-   - Voir les modifications, rendre public ou privé, relier à un autre
-     repo, supprimer le `.git`.
+   - Rendre public ou non public, lier avec un autre repo GitHub, supprimer
+     le `.git`.
    - Tous les repos d'un dossier : push ou pull de chacun, en une fois.
    - Envoyer un dossier : sans repo local, ou pour un nouveau projet ; le
-     programme demande le nom, la description et la visibilité du repo.
+     programme demande le nom, la description et si le repo est public.
 3. Compte GitHub : changer de moyen de connexion, changer de compte,
-   changer de serveur, voir les permissions de la connexion, se déconnecter.
+   changer de serveur, voir les permissions de la connexion, fermer la
+   session.
 
 ### Option 2 : entreprise
 
@@ -111,22 +118,21 @@ Connexion au compte GitHub de l'entreprise.
 
 1. Importer un repo GitHub : saisir son URL. Un repo public s'importe sans
    connexion.
-   - Repo privé : connexion au compte GitHub perso le temps de l'import.
-   - Ouverture : avec accord, le repo privé devient public le temps du clone,
-     puis redevient privé après deux minutes, ou tout de suite avec Entrée.
-     Le programme signale avant les fichiers secrets qu'il contient.
-   - Rapport : forks, étoiles, vues et clones comptés par GitHub pendant
+   - Repo non public : connexion au compte GitHub perso le temps de l'import.
+   - Ouverture : avec accord, le repo devient public le temps du clone, puis
+     redevient non public au bout de deux minutes, ou tout de suite avec
+     Enter. Le programme signale avant les fichiers secrets qu'il contient.
+   - Rapport : forks, stars, vues et clones comptés par GitHub pendant
      l'ouverture. GitHub peut mettre plusieurs heures à compter les vues.
    - Envoyer dans un repo GitHub de l'entreprise : numéro d'un repo de la
      liste, ou U pour saisir son URL.
-   - Mettre à jour : fichiers ajoutés ou remplacés, aucun supprimé.
-   - Écraser : le repo prend exactement le contenu du projet importé,
-     historique gardé.
+   - Ajouter au repo, sans rien enlever.
+   - Remplacer le repo par le projet : historique gardé.
    - Copie sur le Bureau : avant l'envoi, le repo de l'entreprise est copié
      sur le Bureau, sous Windows, macOS ou Linux. La copie reste après
      l'envoi.
-2. Gérer les repos GitHub de l'entreprise : les mêmes choix que l'option 1,
-   avec le compte de l'entreprise, dont Voir les accès à ce repo.
+2. Repos GitHub de l'entreprise : les mêmes choix que l'option 1, avec le
+   compte de l'entreprise.
 
 ## Sécurité
 
