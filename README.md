@@ -83,7 +83,8 @@ Connexion au compte GitHub perso.
    - Rendre public ou non public.
    - Ouvrir la copie sur cette machine : le dossier s'ouvre dans le
      gestionnaire de fichiers du système et son menu dans le terminal.
-   - Cloner le projet en local, quand aucune copie n'existe.
+   - Cloner le projet en local, quand aucune copie n'existe. Si le dossier
+     existe déjà, le programme propose de le lier avec le repo, puis pull.
    - Ouvrir la copie en ligne : la page du repo dans le navigateur.
    - Comparer en ligne et en local : un tableau à deux colonnes, en ligne et
      en local, avec la date du dernier commit, la copie la plus neuve, les
@@ -108,6 +109,10 @@ Connexion au compte GitHub perso.
    - Tous les repos d'un dossier : push ou pull de chacun, en une fois.
    - Envoyer un dossier : sans repo local, ou pour un nouveau projet ; le
      programme demande le nom, la description et si le repo est public.
+   - Dossier sans git, ou au `.git` illisible : le programme propose de le
+     lier avec un repo GitHub en ligne, celui du même nom s'il existe, puis
+     de faire un pull. Les fichiers du dossier qui ne sont pas comme la
+     version en ligne partent dans `git stash`, ou restent, au choix.
 3. Compte GitHub : changer de moyen de connexion, changer de compte,
    changer de serveur, voir les permissions de la connexion, temps de garde
    du compte sur la machine, fermer la session.

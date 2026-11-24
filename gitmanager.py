@@ -36,7 +36,8 @@ separes. Les textes du programme evitent les mots qui prennent un accent.
      - Repos GitHub en local : Envoyer, commit + push avec le message du
        commit au choix ; Recevoir, pull ; Remplacer GitHub par ce dossier,
        force push ; ouvrir la copie sur cette machine ou en ligne ; push ou
-       pull de tous les repos d'un dossier ; envoi d'un dossier sur GitHub.
+       pull de tous les repos d'un dossier ; envoi d'un dossier sur GitHub ;
+       dossier sans git : lien avec son repo en ligne, puis pull.
      - Compte GitHub : moyen de connexion, compte, serveur, permissions,
        fin de session.
 
@@ -98,7 +99,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.9.3"
+__version__ = "2.10.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -536,11 +537,11 @@ def racine_repo(chemin):
 def acces_repo(chemin):
     """Racine du repo git du dossier. Quand un .git existe mais que Git refuse de
     le lire, le programme dit pourquoi et propose la solution. Retourne
-    (racine ou None, True si un .git existe)."""
+    (racine ou None, etat) : ok, absent, bloque ou illisible."""
     for essai in (1, 2):
         code, out, e = git("rev-parse", "--show-toplevel", cwd=chemin, quiet=True)
         if code == 0 and out:
-            return os.path.normpath(out), True
+            return os.path.normpath(out), "ok"
         if "dubious ownership" not in e.lower() or essai == 2:
             break
         # Git bloque un repo dont le dossier appartient a un autre compte du poste
@@ -551,22 +552,22 @@ def acces_repo(chemin):
         info("Git protege ainsi les dossiers des autres comptes, par exemple apres une copie")
         info("depuis un autre Mac ou un clone fait avec sudo.")
         if not ask_yn("Faire confiance au dossier ? Git le note dans safe.directory.", True):
-            return None, True
+            return None, "bloque"
         git("config", "--global", "--add", "safe.directory", cible, quiet=True)
-    existe = os.path.lexists(os.path.join(chemin, ".git"))
-    if existe:
-        s = e.lower()
-        print()
-        err(f"Git ne peut pas lire le dossier .git de {chemin}.")
-        if "operation not permitted" in s or "permission denied" in s:
-            info("Le systeme bloque ce dossier pour ce terminal : sur macOS, l'autoriser dans")
-            info("Reglages Systeme, Confidentialite et securite, Fichiers et dossiers.")
-        elif "dubious ownership" in s:
-            info("Git bloque encore ce dossier : voir son proprietaire.")
-        else:
-            info("Le dossier .git est sans doute incomplet, par exemple avec iCloud ou OneDrive :")
-            info("cloner de nouveau le repo depuis Repos GitHub en ligne.")
-    return None, existe
+    if not os.path.lexists(os.path.join(chemin, ".git")):
+        return None, "absent"
+    s = e.lower()
+    print()
+    err(f"Git ne peut pas lire le dossier .git de {chemin}.")
+    if "operation not permitted" in s or "permission denied" in s:
+        info("Le systeme bloque ce dossier pour ce terminal : sur macOS, l'autoriser dans")
+        info("Reglages Systeme, Confidentialite et securite, Fichiers et dossiers.")
+        return None, "bloque"
+    if "dubious ownership" in s:
+        info("Git bloque encore ce dossier : voir son proprietaire.")
+        return None, "bloque"
+    info("Le dossier .git est sans doute incomplet, par exemple avec iCloud ou OneDrive.")
+    return None, "illisible"
 
 
 def branche_courante(chemin):
@@ -2606,28 +2607,117 @@ def menu_init(cfg, chemin):
     """Dossier sans git. Retourne True si un repo a ete cree."""
     titre("Nouveau projet git")
     info(f"{chemin} n'est pas un repo git.")
+    meme = repo_du_meme_nom(cfg, chemin)
+    if meme:
+        info(f"Repo en ligne avec ce nom : {meme['full_name']}")
     print()
-    print("    1. git init, nouveau repo GitHub, premier commit et push")
-    print("    2. git init seulement")
+    print("    1. " + (f"Lier avec {meme['full_name']}, puis pull" if meme
+                       else "Lier avec un repo GitHub en ligne, puis pull"))
+    print("    2. git init, nouveau repo GitHub, premier commit et push")
+    print("    3. git init seulement")
     print("    0. Retour")
     choix = ask("Choix", "0")
-    if choix not in ("1", "2"):
+    if choix == "1":
+        if not assurer_connexion(cfg):
+            return False
+        cible = ask("Repo en ligne : compte/nom ou URL", meme["full_name"] if meme else "")
+        executer(lier_et_recevoir, cfg, chemin, url_repo_en_ligne(cfg, cible))
+        pause()
+        return racine_repo(chemin) is not None
+    if choix not in ("2", "3"):
         return False
     init_depot(chemin)
     gi = Path(chemin) / ".gitignore"
     if not gi.exists() and ask_yn("Ajouter un .gitignore standard pour Python et Node ?", True):
         gi.write_text(GITIGNORE, encoding="utf-8")
         ok("Nouveau .gitignore")
-    if choix == "1":
+    if choix == "2":
         executer(act_commit_push, cfg, chemin)
         pause()
     return True
 
 
+def repo_du_meme_nom(cfg, chemin):
+    """Repo GitHub du compte en session qui porte le nom du dossier, ou None."""
+    if not SESSION["token"]:
+        return None
+    nom = os.path.basename(os.path.normpath(chemin)).lower()
+    repos = api_liste(cfg, "/user/repos?per_page=100"
+                           "&affiliation=owner,collaborator,organization_member") or []
+    return next((d for d in repos if (d.get("name") or "").lower() == nom), None)
+
+
+def url_repo_en_ligne(cfg, cible):
+    """nom, compte/nom ou URL : adresse du repo en ligne."""
+    cible = cible.strip()
+    if "://" in cible or cible.startswith("git@"):
+        return verifier_url(cible)
+    if "/" not in cible:
+        cible = f"{SESSION['user']['login']}/{cible}"
+    return f"https://{host(cfg)}/{cible.removesuffix('.git')}.git"
+
+
+def lier_et_recevoir(cfg, chemin, url):
+    """Dossier qui contient le meme projet qu'un repo en ligne : lien avec ce repo,
+    puis pull de sa version la plus neuve. Les fichiers de ce dossier qui ne sont
+    pas comme la version en ligne partent dans git stash, au choix ; ceux absents
+    du repo en ligne restent."""
+    if racine_repo(chemin) is None:
+        init_depot(chemin)
+    elif a_des_commits(chemin):
+        raise Arret("ignore", "ce dossier a son propre historique git : l'ouvrir dans "
+                              "Repos GitHub en local, puis Lier avec GitHub")
+    if "origin" in remotes(chemin):
+        git("remote", "set-url", "origin", url, cwd=chemin)
+    else:
+        git("remote", "add", "origin", url, cwd=chemin)
+    info("Lecture du repo en ligne...")
+    recuperer(cfg, chemin, "origin", auto=False)
+    branche = branche_defaut_distante(chemin, "origin") or "main"
+    ref = f"origin/{branche}"
+    if not ref_existe(chemin, f"refs/remotes/{ref}"):
+        return "ignore", "le repo en ligne est vide : utiliser Envoyer"
+    # la branche locale passe sur la version en ligne, les fichiers du dossier ne bougent pas
+    git("symbolic-ref", "HEAD", f"refs/heads/{branche}", cwd=chemin, quiet=True)
+    git("reset", "--mixed", "--quiet", ref, cwd=chemin)
+    git("branch", "--set-upstream-to", ref, branche, cwd=chemin, quiet=True)
+    modifs = fichiers_modifies(chemin)
+    suivis = [l for l in modifs if not l.startswith("??")]
+    nouveaux = len(modifs) - len(suivis)
+    print()
+    if not suivis:
+        ok("Ce dossier et la version en ligne sont pareils.")
+    else:
+        warn(f"{len(suivis)} fichier(s) de ce dossier ne sont pas comme la version en ligne :")
+        for l in suivis[:20]:
+            print(f"       {statut_porcelaine(l):<9} {l[3:]}")
+        if len(suivis) > 20:
+            print(f"       ... et {len(suivis) - 20} autre(s)")
+        print()
+        print("    1. Prendre la version en ligne : pull, ces fichiers partent dans git stash")
+        print("    2. Garder les fichiers de ce dossier : changements sans commit")
+        if ask("Choix", "1") == "1":
+            git("stash", "push", "-m", "gitmanager : fichiers avant le pull", cwd=chemin)
+            ok("Version en ligne OK dans ce dossier.")
+            info("Fichiers d'avant dans git stash : git stash pop pour les reprendre.")
+        else:
+            info("Les fichiers de ce dossier restent, comme changements sans commit.")
+    if nouveaux:
+        info(f"{nouveaux} fichier(s) absent(s) du repo en ligne restent, sans commit.")
+    return "ok", f"lien avec {url_web(url) or url}, branche {branche}"
+
+
 def menu_projet(cfg, chemin):
     chemin = os.path.normpath(chemin)
-    racine, existe = acces_repo(chemin)
-    if racine is None and (existe or not menu_init(cfg, chemin)):
+    racine, etat = acces_repo(chemin)
+    if etat == "illisible" and ask_yn("Mettre ce .git de cote en .git-illisible, puis lier le dossier avec "
+                                      "son repo en ligne ?", True):
+        cible, n = os.path.join(chemin, ".git-illisible"), 2
+        while os.path.lexists(cible):
+            cible, n = os.path.join(chemin, f".git-illisible-{n}"), n + 1
+        os.rename(os.path.join(chemin, ".git"), cible)
+        etat = "absent"
+    if racine is None and (etat != "absent" or not menu_init(cfg, chemin)):
         return
     nettoyer_depot(chemin)
     remote = remote_principal(chemin)
@@ -3398,6 +3488,14 @@ def cloner(cfg, d):
     parent = nettoyer_chemin(ask("Cloner dans le dossier", defaut))
     dest = os.path.join(parent, d["name"])
     if os.path.exists(dest) and (not os.path.isdir(dest) or os.listdir(dest)):
+        if os.path.isdir(dest) and ask_yn(f"{dest} existe : le lier avec {d['full_name']}, "
+                                          "puis pull ?", True):
+            res = executer(lier_et_recevoir, cfg, dest, d["clone_url"])
+            if res and res[0] == "ok":
+                cfg["dernier_dossier"] = dest
+                sauver(cfg)
+                return dest
+            return None
         err(f"{dest} existe et n'est pas vide.")
         return None
     os.makedirs(parent, exist_ok=True)
