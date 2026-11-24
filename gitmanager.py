@@ -52,14 +52,14 @@ separes. Les textes du programme evitent les mots qui prennent un accent.
 
 Les identifiants se gerent dans les menus des repos GitHub, perso ou de
 l'entreprise, avec une session ouverte : Fermer la session, puis garder le
-compte sur cette machine ou le supprimer sans trace ; Supprimer les
+compte sur cette machine ou le supprimer ; Supprimer les
 identifiants de cette machine, quand il y en a. Le menu principal n'en parle
 pas.
 
 Connexion : 1. Se connecter sur le navigateur, avec GitHub CLI ou Git
 Credential Manager : le compte reste sur cette machine pour un temps au
 choix, cette session, 8 heures, 7 jours, 30 jours ou toujours, puis il est
-supprime sans trace ; avec GitHub CLI 2.103 ou plus, jeton qui expire et se
+supprime ; avec GitHub CLI 2.103 ou plus, jeton qui expire et se
 renouvelle seul. 2. Saisir un jeton : dans la session seulement, jamais sur
 le disque, fin apres 15 minutes sans action et a la fermeture du programme.
 La connexion par code apparait quand l'application GitHub de gitmanager est
@@ -98,7 +98,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.9.0"
+__version__ = "2.9.1"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -1345,7 +1345,7 @@ def connexion_interactive(cfg, autre_compte=False):
         if choix == "1":
             warn("Le compte reste sur cette machine pour un temps au choix : cette session,")
             warn("8 heures, 7 jours, 30 jours ou toujours. Fermer la session peut aussi le")
-            warn("supprimer sans trace.")
+            warn("supprimer.")
             if not ask_yn("Continuer ?", True):
                 continue
             connecte = connexion_navigateur(cfg, autre_compte)
@@ -1473,8 +1473,8 @@ def connexion_navigateur(cfg, autre_compte=False):
 
 # Temps de garde d'un compte sur cette machine, choisi a la connexion par le
 # navigateur : pour la session, un nombre d'heures ou de jours, ou toujours. A la
-# fin du temps, le compte est supprime sans trace, comme avec Fermer la session.
-GARDES = (("Pour cette session : suppression sans trace en fin de programme", "session"),
+# fin du temps, le compte est supprime, comme avec Fermer la session.
+GARDES = (("Pour cette session : suppression en fin de programme", "session"),
           ("8 heures", 8 * 3600), ("7 jours", 7 * 86400), ("30 jours", 30 * 86400),
           ("Toujours", None))
 
@@ -1508,7 +1508,7 @@ def texte_garde(cfg, profil=None):
 
 
 def verifier_gardes(cfg, demarrage=False, fin=False):
-    """Supprime sans trace les comptes dont le temps de garde est fini. Un compte
+    """Supprime les comptes dont le temps de garde est fini. Un compte
     pour cette session part en fin de programme, ou au demarrage suivant si le
     programme s'est arrete sans finir."""
     actif = PROFIL["nom"]
@@ -1569,7 +1569,7 @@ def assurer_connexion(cfg, interactif=True):
 
 
 def deconnexion(cfg):
-    """Deconnexion du compte actif. Quand le compte a laisse des traces sur cette
+    """Deconnexion du compte actif. Quand le compte a laisse des identifiants sur cette
     machine, le programme propose de le garder ou de le supprimer. Retourne
     False si la deconnexion est annulee."""
     login = (SESSION["user"] or {}).get("login") or cfg.get(cle("login"))
@@ -1583,7 +1583,7 @@ def deconnexion(cfg):
         print()
         print("  Garder le compte sur cette machine ?")
         print("    1. Garder le compte")
-        print("    2. Supprimer le compte, sans trace")
+        print("    2. Supprimer le compte")
         print("    0. Annuler")
         choix = ask("Choix", "0")
         if choix not in ("1", "2"):
@@ -1664,7 +1664,7 @@ def retirer_helper(serveur, motif):
 
 
 def supprimer_compte(cfg, login=None, silencieux=False):
-    """Supprime de cette machine toutes les traces du compte actif : cles de
+    """Supprime de cette machine tous les identifiants du compte actif : cles de
     GitHub CLI et de Git Credential Manager, identifiants en clair, identite des
     commits ecrite par gitmanager, reglages du compte dans gitmanager."""
     profil, h = PROFIL["nom"], host(cfg)
@@ -1718,11 +1718,11 @@ def supprimer_compte(cfg, login=None, silencieux=False):
     sauver(cfg)
     restes += traces_compte(cfg)
     if restes:
-        warn("Ces traces du compte restent sur cette machine :")
+        warn("Ces identifiants du compte restent sur cette machine :")
         for t in restes:
             warn(f"  - {t}")
     elif not silencieux:
-        ok(f"Compte {login or ''} : plus aucune trace sur cette machine.".replace("  ", " "))
+        ok(f"Compte {login or ''} : suppression OK sur cette machine.".replace("  ", " "))
     if (methode or login) and not silencieux:
         info("Sur GitHub, les autorisations restent visibles ici, pour les retirer :")
         info(f"https://{h}/settings/applications et https://{h}/settings/tokens")
@@ -1731,14 +1731,14 @@ def supprimer_compte(cfg, login=None, silencieux=False):
 
 def act_supprimer_identifiants(cfg):
     """Session ouverte : supprime les identifiants du compte de cette machine,
-    sans trace, et ferme la session."""
+    et ferme la session."""
     login = (SESSION["user"] or {}).get("login") or cfg.get(cle("login"))
     traces = traces_compte(cfg)
     print()
     info(f"Sur cette machine, pour le compte GitHub {nom_compte()} {login or ''} :")
     for t in traces:
         print(f"       - {t}")
-    if not ask_yn("Supprimer ces identifiants, sans trace ? La session se ferme aussi.", False):
+    if not ask_yn("Supprimer ces identifiants ? La session se ferme aussi.", False):
         info("Abandon.")
         return
     SESSION.update(token="", user=None, methode=None)
@@ -1754,12 +1754,12 @@ def act_supprimer_compte(cfg):
     traces = traces_compte(cfg)
     print()
     if not traces:
-        info(f"Aucune trace du compte GitHub {nom_compte()} sur cette machine.")
+        info(f"Aucun identifiant du compte GitHub {nom_compte()} sur cette machine.")
         return
     info(f"Sur cette machine, pour le compte GitHub {nom_compte()} {login} :")
     for t in traces:
         print(f"       - {t}")
-    if ask_yn("Supprimer ce compte de cette machine, sans laisser de trace ?", False):
+    if ask_yn("Supprimer ce compte de cette machine ?", False):
         supprimer_compte(cfg, login or None)
 
 

@@ -46,7 +46,7 @@ La connexion propose deux moyens :
 
 1. Se connecter sur le navigateur : le compte reste sur la machine pour un
    temps au choix, cette session, 8 heures, 7 jours, 30 jours ou toujours. À
-   la fin du temps, le compte est supprimé sans trace. Avec GitHub CLI 2.103
+   la fin du temps, le compte est supprimé. Avec GitHub CLI 2.103
    ou plus, le jeton expire au bout de quelques heures et GitHub CLI le
    renouvelle seul.
 2. Saisir un jeton : la connexion reste dans la session, jamais sur le
@@ -115,11 +115,10 @@ Connexion au compte GitHub perso.
    la machine.
    - Garder le compte : la prochaine connexion par le navigateur le
      réutilise.
-   - Supprimer le compte, sans trace : connexion enregistrée, identifiants en
-     clair, nom et email des commits et réglages du compte sont effacés.
+   - Supprimer le compte : connexion enregistrée, identifiants en clair, nom
+     et email des commits et réglages du compte sont effacés.
 5. Supprimer les identifiants de cette machine : seulement quand des
-   identifiants y sont gardés ; tout est effacé sans trace et la session se
-   ferme.
+   identifiants y sont gardés ; tout est effacé et la session se ferme.
 
 ### Option 2 : entreprise
 
@@ -151,7 +150,7 @@ Connexion au compte GitHub de l'entreprise.
 <img src="https://img.shields.io/badge/Poste%20pro-aucune%20connexion%20enregistr%C3%A9e-2ea44f" alt="Poste pro : aucune connexion enregistrée">
 <img src="https://img.shields.io/badge/Inactivit%C3%A9-connexion%20oubli%C3%A9e%20apr%C3%A8s%2015%20min-2ea44f" alt="Inactivité : connexion oubliée après 15 min">
 <img src="https://img.shields.io/badge/Identifiants%20en%20clair-alerte-2ea44f" alt="Identifiants en clair : alerte">
-<img src="https://img.shields.io/badge/Compte%20supprim%C3%A9-aucune%20trace-2ea44f" alt="Compte supprimé : aucune trace">
+<img src="https://img.shields.io/badge/Compte%20supprim%C3%A9-tout%20effac%C3%A9-2ea44f" alt="Compte supprimé : tout effacé">
 <img src="https://img.shields.io/badge/Temps%20de%20garde%20du%20compte-au%20choix-2ea44f" alt="Temps de garde du compte : au choix">
 <img src="https://img.shields.io/badge/Jeton%20GitHub%20CLI-expire%20et%20se%20renouvelle-2ea44f" alt="Jeton GitHub CLI : expire et se renouvelle">
 <img src="https://img.shields.io/badge/Fichiers%20secrets-exclus%20de%20l%27envoi-2ea44f" alt="Fichiers secrets : exclus de l'envoi">
