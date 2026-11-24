@@ -27,8 +27,10 @@ demande d'abord la connexion a son compte GitHub ; sans connexion, retour au
 menu principal. Les deux comptes restent separes.
 
   1. Gerer les repos GitHub, connexion au compte GitHub perso
-     - Repos GitHub en ligne : fichiers, commits, public / prive, ouvrir la
-       copie locale ou cloner le projet en local, voir les acces, supprimer.
+     - Repos GitHub en ligne : recherche par nom, fichiers, commits, public
+       / prive, ouvrir la copie sur cette machine ou cloner le projet en
+       local, ouvrir la copie en ligne, comparer la copie en ligne et la
+       copie sur cette machine, voir les acces, supprimer.
      - Repos GitHub en local : envoyer, c'est-a-dire commit + push ; mettre
        a jour par pull ; ecraser par force push ; push ou pull de tous les
        repos d'un dossier ; sans repo local, envoi d'un dossier sur GitHub
@@ -80,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.0.1"
+__version__ = "2.1.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -2168,7 +2170,7 @@ def act_depots(cfg):
         print()
         entete = f"{len(vue)} repo(s)" + (f" contenant '{filtre}'" if filtre else "")
         print(c(f"    {entete}", "1"))
-        print(c(f"    {'#':>3}  {'Repo':<42} {'Visib.':<7} {'Envoi':<10}  Sur ce PC", "90"))
+        print(c(f"    {'#':>3}  {'Repo':<42} {'Visib.':<7} {'Envoi':<10}  En local", "90"))
         for i, d in enumerate(vue, 1):
             nom = d["full_name"] if len(d["full_name"]) <= 42 else d["full_name"][:41] + "~"
             vis = "prive" if d.get("private") else "public"
@@ -2176,14 +2178,17 @@ def act_depots(cfg):
             loc = "oui" if d["full_name"].lower() in locaux else ""
             print(f"    {i:>3}. {nom:<42} {vis:<7} {date:<10}  {loc}")
         print()
-        choix = ask("Numero d'un repo, texte pour filtrer, * pour tout, Entree pour revenir",
+        retour = "Entree pour revenir a toute la liste" if filtre else "Entree pour revenir"
+        choix = ask(f"Chercher un repo, ou saisir un numero pour le selectionner, {retour}",
                     "", obligatoire=False)
         if not choix:
-            return
-        if choix.isdigit() and 1 <= int(choix) <= len(vue):
+            if not filtre:
+                return
+            filtre = ""
+        elif choix.isdigit() and 1 <= int(choix) <= len(vue):
             menu_depot(cfg, vue[int(choix) - 1], locaux)
         else:
-            filtre = "" if choix == "*" else choix
+            filtre = choix
 
 
 def ouvrir_explorateur(chemin):
@@ -2221,15 +2226,16 @@ def menu_depot(cfg, d, locaux):
         info(d["html_url"])
         info(f"Branche principale : {d.get('default_branch') or '-'}    "
              f"Dernier envoi : {(d.get('pushed_at') or '-')[:10]}")
-        info(f"Copie sur cet ordinateur : {local or 'aucune'}")
+        info(f"Copie sur cette machine : {local or 'aucune'}")
         print()
         print("    1. Parcourir les fichiers")
         print("    2. Voir les commits")
         print("    3. Rendre " + ("PUBLIC" if d.get("private") else "PRIVE"))
-        print("    4. " + ("Ouvrir la copie" if local else "Cloner le projet en local"))
-        print("    5. Ouvrir dans le navigateur")
-        print("    6. Supprimer de GitHub")
+        print("    4. " + ("Ouvrir la copie sur cette machine" if local else "Cloner le projet en local"))
+        print("    5. Ouvrir la copie en ligne")
+        print("    6. Comparer la copie en ligne et la copie sur cette machine")
         print("    7. Voir les acces a ce repo")
+        print("    8. Supprimer de GitHub")
         print("    0. Retour a la liste")
         choix = ask("Choix", "0")
         if choix == "1":
@@ -2249,16 +2255,143 @@ def menu_depot(cfg, d, locaux):
                 menu_projet(cfg, local)
         elif choix == "5":
             webbrowser.open(d["html_url"])
+        elif choix == "6":
+            if not local:
+                warn("Aucune copie sur cette machine : la cloner avec le choix 4.")
+                pause()
+            elif executer(comparer_copies, cfg, d, local) != "retour":
+                pause()
         elif choix == "7":
             afficher_acces(cfg, d)
             pause()
-        elif choix == "6":
+        elif choix == "8":
             if supprimer_depot(cfg, d):
                 pause()
                 return "supprime"
             pause()
         else:
             return None
+
+
+ETATS_ECART = {"M": "different", "T": "different", "A": "sur cette machine seulement",
+               "D": "en ligne seulement"}
+
+
+def lignes_texte(fichier, maxi=2_000_000):
+    """Lignes d'un fichier texte, ou None pour un binaire, un lien ou un trop gros fichier."""
+    try:
+        if os.path.islink(fichier) or os.path.getsize(fichier) > maxi:
+            return None
+        with open(fichier, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    if b"\0" in data:
+        return None
+    return data.decode("utf-8", errors="replace").splitlines()
+
+
+def ecarts_fichiers(chemin, ref):
+    """Fichiers qui different entre ref et le dossier, fichiers non commites
+    compris : liste de (etat, fichier, lignes ajoutees, lignes retirees, suivi)."""
+    _, ns, _ = git("diff", "--no-renames", "--name-status", "-z", ref, "--", cwd=chemin, quiet=True)
+    _, num, _ = git("diff", "--no-renames", "--numstat", "-z", ref, "--", cwd=chemin, quiet=True)
+    lignes = {}
+    for rec in num.split("\0"):
+        parts = rec.split("\t", 2)
+        if len(parts) == 3:
+            lignes[parts[2]] = (parts[0], parts[1])
+    morceaux = [m for m in ns.split("\0") if m]
+    ecarts = []
+    for etat, fichier in zip(morceaux[0::2], morceaux[1::2]):
+        plus, moins = lignes.get(fichier, ("", ""))
+        ecarts.append((ETATS_ECART.get(etat[:1], etat), fichier, plus, moins, True))
+    _, autres, _ = git("ls-files", "--others", "--exclude-standard", "-z", cwd=chemin, quiet=True)
+    for fichier in (f for f in autres.split("\0") if f):
+        texte = lignes_texte(os.path.join(chemin, fichier))
+        ecarts.append((ETATS_ECART["A"], fichier, "" if texte is None else str(len(texte)), "0", False))
+    return sorted(ecarts, key=lambda e: e[1].lower())
+
+
+def comparer_copies(cfg, d, chemin):
+    """Ce qui differe entre la copie en ligne, sur sa branche principale, et la
+    copie sur cette machine, fichiers non commites compris. Retourne "retour"
+    quand Entree ramene a l'ecran du repo."""
+    titre("Comparer la copie en ligne et la copie sur cette machine")
+    remote = remote_principal(chemin)
+    if not remote:
+        raise Arret("ignore", "la copie sur cette machine n'est reliee a aucun repo en ligne")
+    branche = d.get("default_branch") or branche_courante(chemin) or "main"
+    ici = branche_courante(chemin)
+    info(f"Copie en ligne : {d['html_url']}, branche {branche}")
+    info(f"Copie sur cette machine : {chemin}, branche {ici or '-'}")
+    if ici and ici != branche:
+        warn(f"Cette machine est sur la branche {ici} : comparaison avec la branche {branche} en ligne.")
+    info("Lecture de la copie en ligne avec git fetch...")
+    recuperer(cfg, chemin, remote, auto=False)
+    ref = f"{remote}/{branche}"
+    if not ref_existe(chemin, f"refs/remotes/{ref}"):
+        raise Arret("ignore", f"la branche {branche} n'existe pas encore en ligne")
+    nb_ecarts = 0
+    if a_des_commits(chemin):
+        for plage, libelle in ((f"HEAD..{ref}", "Commits en ligne, absents de cette machine"),
+                               (f"{ref}..HEAD", "Commits sur cette machine, pas encore envoyes")):
+            n = nb_commits(chemin, plage)
+            nb_ecarts += n
+            print()
+            info(f"{libelle} : {n}")
+            if n:
+                _, log, _ = git("log", "--format=%h  %ad  %s", "--date=short", "-10", plage,
+                                cwd=chemin, quiet=True)
+                for l in log.splitlines():
+                    print("       " + l)
+                if n > 10:
+                    print(f"       ... et {n - 10} autre(s)")
+    print()
+    info(f"Fichiers modifies sur cette machine, sans commit : {len(fichiers_modifies(chemin))}")
+    ecarts = ecarts_fichiers(chemin, ref)
+    if not ecarts:
+        print()
+        if nb_ecarts:
+            ok("Les fichiers sont identiques dans les deux copies, seuls les commits different.")
+        else:
+            ok("Les deux copies sont identiques.")
+        return None
+    while True:
+        print()
+        info(f"Fichiers differents entre les deux copies : {len(ecarts)}")
+        print(c("       + : lignes sur cette machine seulement, - : lignes en ligne seulement", "90"))
+        for i, (etat, fichier, plus, moins, _) in enumerate(ecarts[:200], 1):
+            if plus == "-":
+                lignes = "binaire"
+            else:
+                lignes = " ".join(x for x in (f"+{plus}" if plus not in ("", "0") else "",
+                                              f"-{moins}" if moins not in ("", "0") else "") if x)
+            print(f"    {i:>3}. {etat:<28} {fichier[:40]:<40} {lignes}")
+        if len(ecarts) > 200:
+            print(f"         ... et {len(ecarts) - 200} autre(s)")
+        print()
+        choix = ask("Numero d'un fichier pour voir le detail ligne par ligne, Entree pour revenir",
+                    "", obligatoire=False)
+        if not choix:
+            return "retour"
+        if not (choix.isdigit() and 1 <= int(choix) <= min(len(ecarts), 200)):
+            warn("Choix invalide.")
+            continue
+        etat, fichier, _, _, suivi = ecarts[int(choix) - 1]
+        print()
+        if not suivi:
+            info(f"{fichier} : nouveau fichier sur cette machine, pas encore dans un commit.")
+            texte = lignes_texte(os.path.join(chemin, fichier))
+            if texte is None:
+                info("Contenu non affichable : fichier binaire, lien ou trop gros.")
+            for ligne in (texte or [])[:200]:
+                print(c("+" + ligne, "32"))
+            if texte and len(texte) > 200:
+                print(f"       ... et {len(texte) - 200} autre(s) ligne(s)")
+        else:
+            git_direct("--no-pager", "diff", "--no-renames", ref, "--", fichier, cwd=chemin)
+        pause()
 
 
 def _contenu(cfg, full, chemin, ref):

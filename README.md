@@ -63,15 +63,19 @@ Entrée quitte le programme.
 
 Connexion au compte GitHub perso.
 
-1. Repos GitHub en ligne : la liste des repos sur GitHub.
+1. Repos GitHub en ligne : la liste des repos sur GitHub, avec une
+   recherche par nom ; le numéro d'un repo l'ouvre.
    - Parcourir les fichiers et voir les commits.
    - Rendre public ou privé.
-   - Ouvrir la copie : le dossier s'ouvre dans le gestionnaire de fichiers
-     du système et son menu dans le terminal.
+   - Ouvrir la copie sur cette machine : le dossier s'ouvre dans le
+     gestionnaire de fichiers du système et son menu dans le terminal.
    - Cloner le projet en local, quand aucune copie n'existe.
-   - Ouvrir dans le navigateur.
-   - Supprimer.
+   - Ouvrir la copie en ligne : la page du repo dans le navigateur.
+   - Comparer la copie en ligne et la copie sur cette machine : les commits
+     absents de chaque côté, les fichiers différents, puis le détail ligne
+     par ligne d'un fichier.
    - Voir les accès à ce repo : le rôle du compte et ses droits.
+   - Supprimer.
 2. Repos GitHub en local : la liste des repos trouvés sur l'ordinateur.
    - Envoyer : commit et push.
    - Mettre à jour : pull.
