@@ -72,7 +72,7 @@ Le menu principal propose ensuite deux options.
    - Écraser : force push, GitHub prend le contenu du dossier.
    - Voir les modifications, rendre public ou privé, relier à un autre
      repo, supprimer le `.git`.
-   - Tout mettre à jour : tous les repos d'un dossier en une fois.
+   - Tous les repos d'un dossier : push ou pull de chacun, en une fois.
    - Envoyer un dossier : sans repo local, ou pour un nouveau projet ; le
      programme demande le nom, la description et la visibilité du repo.
 3. Compte GitHub : changer de moyen de connexion, se déconnecter, changer de

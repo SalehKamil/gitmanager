@@ -29,9 +29,9 @@ sans connexion, le programme s'arrete. Menu principal :
      - Gerer les repos GitHub : fichiers, commits, public / prive, ouvrir la
        copie locale ou cloner le projet en local, supprimer.
      - Gerer les repos locaux : envoyer, c'est-a-dire commit + push ; mettre
-       a jour par pull ; ecraser par force push ; tout mettre a jour ; sans
-       repo local, envoi d'un dossier sur GitHub avec nom, description et
-       visibilite.
+       a jour par pull ; ecraser par force push ; push ou pull de tous les
+       repos d'un dossier ; sans repo local, envoi d'un dossier sur GitHub
+       avec nom, description et visibilite.
 
   2. Synchroniser un repo sur l'ordinateur de l'entreprise
      Recupere le repo GitHub dans un dossier temporaire, sans identifiant
@@ -72,7 +72,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -1655,7 +1655,7 @@ def recuperer_projet(cfg, chemin, auto=False):
 
 
 def synchroniser(cfg, chemin, message=None, envoyer=True):
-    """Version sans question (mode 'tout mettre a jour')."""
+    """Version sans question, pour tous les repos d'un dossier."""
     try:
         if not envoyer:
             return recuperer_projet(cfg, chemin, auto=True)
@@ -1975,9 +1975,9 @@ def menu_projet(cfg, chemin):
         entete_projet(chemin)
         relie = bool(remote_principal(chemin))
         print()
-        print("    1. Envoyer")
-        print("    2. Mettre a jour")
-        print("    3. Ecraser GitHub avec ce dossier")
+        print("    1. Envoyer : commit + push")
+        print("    2. Mettre a jour : pull")
+        print("    3. Ecraser GitHub avec ce dossier : force push")
         print("    4. Voir les modifications")
         print("    5. Rendre le repo public / prive")
         print("    6. " + ("Relier a un autre repo GitHub" if relie else "Relier a GitHub"))
@@ -2073,7 +2073,7 @@ def act_depots_locaux(cfg):
         print(f"    {i:>3}. {nom:<44} {modifs:>10}  {lien_court(url)}")
     print()
     print("      N. Envoyer un autre dossier sur GitHub")
-    print("      T. Tout mettre a jour")
+    print("      T. Tous les repos d'un dossier : push ou pull")
     choix = ask("Numero d'un repo, N ou T, Entree pour revenir", "", obligatoire=False).lower()
     if choix.isdigit() and 1 <= int(choix) <= len(projets):
         ouvrir_dossier(cfg, projets[int(choix) - 1])
@@ -2087,7 +2087,7 @@ def act_depots_locaux(cfg):
 
 
 def act_tout(cfg):
-    titre("Tout mettre a jour")
+    titre("Tous les repos d'un dossier")
     defaut = cfg.get("espace") or os.path.dirname(cfg.get("dernier_dossier") or "") or os.getcwd()
     cfg.setdefault("espace", defaut)
     dossier = choisir_dossier(cfg, "Dossier qui contient les projets", "espace")
@@ -2103,8 +2103,8 @@ def act_tout(cfg):
         nom = os.path.relpath(p, dossier) if p != dossier else os.path.basename(p)
         print(f"    {nom[:28]:<28} {branche[:12]:<12} {modifs:>10}  {lien_court(url)}")
     print()
-    print("    1. Tout envoyer")
-    print("    2. Tout mettre a jour depuis GitHub")
+    print("    1. Tout envoyer : commit + push de chaque repo")
+    print("    2. Tout mettre a jour : pull de chaque repo")
     print("    0. Annuler")
     mode = ask("Choix", "1")
     if mode not in ("1", "2"):
