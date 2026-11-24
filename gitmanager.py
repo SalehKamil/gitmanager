@@ -98,7 +98,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.4.0"
+__version__ = "2.4.1"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -206,7 +206,7 @@ def err(t):
 
 
 def info(t):
-    print(c(f"  ->   {t}", "90"))
+    print(f"  ->   {t}")
 
 
 def taille(n):
@@ -256,7 +256,7 @@ def ask_yn(question, defaut=False):
 
 
 def pause():
-    saisie(c("\n  Entree pour continuer", "90"))
+    saisie(c("\n  Entree pour continuer", "1"))
 
 
 def message_defaut():
@@ -373,7 +373,7 @@ def git(*args, cwd=None, quiet=False, env=None):
     """Execute une commande git. Retourne (code, stdout, stderr)."""
     cmd = ["git", "-c", "core.quotepath=off"] + [str(a) for a in args]
     if not quiet:
-        print(c("  $ git " + _affiche(args), "90"))
+        print(c("  $ git " + _affiche(args), "36"))
     p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
                        encoding="utf-8", errors="replace", env=env or _env_git())
     out, errs = (p.stdout or "").rstrip(), (p.stderr or "").strip()
@@ -387,7 +387,7 @@ def git(*args, cwd=None, quiet=False, env=None):
 
 def git_direct(*args, cwd=None):
     """git avec affichage en direct (progression d'un clone, etc.)."""
-    print(c("  $ git " + _affiche(args), "90"))
+    print(c("  $ git " + _affiche(args), "36"))
     return subprocess.run(["git"] + [str(a) for a in args], cwd=cwd,
                           env=_env_git()).returncode
 
@@ -451,7 +451,7 @@ def adresse_principale(chemin):
 
 def lien_court(url):
     """proprietaire/repo, ou la fin de l'adresse, ou 'non relie'."""
-    return (cle_depot(url) or url[-30:]) if url else c("non relie", "90")
+    return (cle_depot(url) or url[-30:]) if url else c("non relie", "33")
 
 
 def apercu_projets(projets, avec_branche=False):
@@ -829,7 +829,7 @@ def installer_outil(outil, mise_a_jour=False):
     if not ask_yn(f"{verbe} {nom}, derniere version disponible, avec {g} ?", True):
         return False
     for cmd in commandes_paquet(g, PAQUETS[outil][g], mise_a_jour):
-        print(c("  $ " + " ".join(cmd), "90"))
+        print(c("  $ " + " ".join(cmd), "36"))
         subprocess.run(cmd)
     actualiser_path()
     if outil == "gh":
@@ -1974,7 +1974,7 @@ def synchroniser(cfg, chemin, message=None, envoyer=True):
 
 
 ETIQUETTES = {"ok": ("[OK]", "32"), "a_jour": ("[=] ", "36"), "conflit": ("[!] ", "33"),
-              "ignore": ("[-] ", "90"), "erreur": ("[X] ", "31")}
+              "ignore": ("[-] ", "36"), "erreur": ("[X] ", "31")}
 
 
 def afficher_resultat(statut, detail, nom=""):
@@ -2373,7 +2373,7 @@ def act_depots_locaux(cfg):
         if ask_yn("Envoyer un dossier sur GitHub ?", True):
             act_autre_dossier(cfg)
         return
-    print(c(f"    {'#':>3}  {'Repo':<44} {'A commiter':>10}  GitHub", "90"))
+    print(c(f"    {'#':>3}  {'Repo':<44} {'A commiter':>10}  GitHub", "1"))
     for i, (p, (url, modifs, _)) in enumerate(zip(projets, apercu_projets(projets)), 1):
         nom = nom_court(p)
         nom = nom if len(nom) <= 44 else "~" + nom[-43:]
@@ -2424,7 +2424,7 @@ def act_tout(cfg):
     bilan = {}
     for i, p in enumerate(projets, 1):
         nom = os.path.relpath(p, dossier) if p != dossier else os.path.basename(p)
-        print(c(f"  [{i}/{len(projets)}] {nom}...", "90"), end="\r", flush=True)
+        print(f"  [{i}/{len(projets)}] {nom}...", end="\r", flush=True)
         statut, detail = synchroniser(cfg, p, message=message, envoyer=(mode == "1"))
         print(" " * 70, end="\r")
         afficher_resultat(statut, detail, nom[:28])
@@ -2459,7 +2459,7 @@ def act_depots(cfg):
         print()
         entete = f"{len(vue)} repo(s)" + (f" contenant '{filtre}'" if filtre else "")
         print(c(f"    {entete}", "1"))
-        print(c(f"    {'#':>3}  {'Repo':<42} {'Visib.':<7} {'Envoi':<10}  En local", "90"))
+        print(c(f"    {'#':>3}  {'Repo':<42} {'Visib.':<7} {'Envoi':<10}  En local", "1"))
         for i, d in enumerate(vue, 1):
             nom = d["full_name"] if len(d["full_name"]) <= 42 else d["full_name"][:41] + "~"
             vis = "prive" if d.get("private") else "public"
@@ -2613,7 +2613,7 @@ def tableau(entetes, lignes, couleurs=None):
             morceaux.append(c(texte, code) if code and n is not None else texte)
         return "    " + "  ".join(morceaux).rstrip()
     print(c(rangee(entetes), "1"))
-    print(c("    " + "  ".join("-" * l for l in larg), "90"))
+    print("    " + "  ".join("-" * l for l in larg))
     for n, l in enumerate(lignes):
         print(rangee(l, n))
 
@@ -2706,15 +2706,15 @@ def cote_a_cote(gauche, droite, titre_gauche, titre_droite, contexte=3, maxi=400
         if num is None:
             return " " * (6 + col)
         texte = couper(texte.expandtabs(4).replace("\r", ""), col)
-        return c(f"{num:>5} ", "90") + texte.ljust(col)
+        return c(f"{num:>5} ", "36") + texte.ljust(col)
     def jaune(num, texte):
         if num is None:
             return " " * (6 + col)
         texte = couper(texte.expandtabs(4).replace("\r", ""), col)
-        return c(f"{num:>5} ", "90") + c(texte.ljust(col), "1;33")
+        return c(f"{num:>5} ", "36") + c(texte.ljust(col), "1;33")
     print(c(f"    {'':6}{'En ligne':<{col}} | {'':6}En local", "1"))
-    print(c(f"    {'':6}{couper(titre_gauche, col):<{col}} | {'':6}{couper(titre_droite, col)}", "90"))
-    print(c(f"    {'-' * (6 + col)}-+-{'-' * (6 + col)}", "90"))
+    print(f"    {'':6}{couper(titre_gauche, col):<{col}} | {'':6}{couper(titre_droite, col)}")
+    print(f"    {'-' * (6 + col)}-+-{'-' * (6 + col)}")
     groupes = list(difflib.SequenceMatcher(None, gauche, droite, autojunk=False)
                    .get_grouped_opcodes(contexte))
     if not groupes:
@@ -2723,14 +2723,14 @@ def cote_a_cote(gauche, droite, titre_gauche, titre_droite, contexte=3, maxi=400
     affichees = 0
     for g, groupe in enumerate(groupes):
         if g:
-            print(c(f"    {'...':>5}{' ' * (col + 1)} | {'...':>5}", "90"))
+            print(f"    {'...':>5}{' ' * (col + 1)} | {'...':>5}")
         for tag, i1, i2, j1, j2 in groupe:
             for k in range(max(i2 - i1, j2 - j1)):
                 i = i1 + k if i1 + k < i2 else None
                 j = j1 + k if j1 + k < j2 else None
                 fmt = case if tag == "equal" else jaune
                 print("    " + fmt(None if i is None else i + 1, gauche[i] if i is not None else "")
-                      + c(" | ", "90")
+                      + " | "
                       + fmt(None if j is None else j + 1, droite[j] if j is not None else ""))
                 affichees += 1
                 if affichees >= maxi:
@@ -2842,9 +2842,8 @@ def comparer_copies(cfg, d, chemin):
         print()
         tableau(["Fichier", "En ligne", "En local"],
                 [[f"{i}. {f}", a, b] for i, (f, a, b) in enumerate(cases[:200], 1)],
-                {**recents, **{(n, col): "90" for n, cs in enumerate(cases[:200])
-                               for col in (1, 2) if cs[col] == "absent"}})
-        print(c("    En vert : la version la plus recente du fichier.", "90"))
+                recents)
+        print("    En vert : la version la plus recente du fichier.")
         if len(cases) > 200:
             print(f"         ... et {len(cases) - 200} autre(s)")
         print()
@@ -2941,7 +2940,7 @@ def afficher_fichier(cfg, full, chemin, ref, d):
         lignes = brut.decode("utf-8", "replace").splitlines()
         print()
         for i, l in enumerate(lignes[:80], 1):
-            print(c(f"  {i:>4} ", "90") + l)
+            print(c(f"  {i:>4} ", "36") + l)
         if len(lignes) > 80:
             info(f"... {len(lignes) - 80} ligne(s) de plus : o pour tout voir sur GitHub")
     if ask("o pour ouvrir sur GitHub, Entree pour revenir", "", obligatoire=False).lower() == "o":
@@ -3562,7 +3561,7 @@ def envoyer_vers_entreprise(cfg, source):
                            "&affiliation=owner,collaborator,organization_member") or []
     print()
     if repos:
-        print(c(f"    {'#':>3}  {'Repo':<44} Droits", "90"))
+        print(c(f"    {'#':>3}  {'Repo':<44} Droits", "1"))
         for i, d in enumerate(repos, 1):
             droits = "ecriture" if (d.get("permissions") or {}).get("push") else "lecture"
             print(f"    {i:>3}. {d['full_name'][:44]:<44} {droits}")
@@ -3738,7 +3737,7 @@ def lancer(fn, cfg, avec_pause=True):
 
 def ligne_compte(cfg):
     print(c(f"  Compte GitHub {nom_compte()} : {SESSION['user'].get('login')}, "
-            f"{NOMS_METHODES[SESSION['methode']]}, {host(cfg)}", "90"))
+            f"{NOMS_METHODES[SESSION['methode']]}, {host(cfg)}", "36"))
 
 
 def compte_a_choisir(noms, action):
@@ -3800,7 +3799,7 @@ def choisir_fonction(cfg):
                 etat = "non connecte, compte enregistre sur cette machine"
             else:
                 continue
-            print(c(f"  Compte GitHub {nom_compte(nom)} : {etat}", "90"))
+            print(c(f"  Compte GitHub {nom_compte(nom)} : {etat}", "36"))
         print()
         print("    1. Gerer les repos GitHub")
         print("    2. Entreprise : importer un repo, gerer les repos GitHub de l'entreprise")
