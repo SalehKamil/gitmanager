@@ -35,7 +35,8 @@ menu principal. Les deux comptes restent separes.
        a jour par pull ; ecraser par force push ; push ou pull de tous les
        repos d'un dossier ; sans repo local, envoi d'un dossier sur GitHub
        avec nom, description et visibilite.
-     - Compte GitHub : moyen de connexion, serveur, permissions.
+     - Compte GitHub : moyen de connexion, compte, serveur, permissions,
+       deconnexion.
 
   2. Entreprise, connexion au compte GitHub de l'entreprise
      - Importer un repo GitHub par son URL. Un repo public s'importe sans
@@ -48,6 +49,16 @@ menu principal. Les deux comptes restent separes.
        l'entreprise sur le Bureau, gardee apres l'envoi.
      - Gerer les repos GitHub de l'entreprise : les memes choix que
        l'option 1, avec le compte de l'entreprise.
+
+  3. Changer de moyen de connexion, pour le compte perso ou celui de
+     l'entreprise.
+  4. Se deconnecter et supprimer les cles enregistrees sur ce poste.
+  5. Se deconnecter et garder les cles enregistrees : la connexion par le
+     navigateur les reutilise. Sans cles enregistrees, un seul choix 4 :
+     Se deconnecter.
+
+La liste des repos GitHub en ligne propose aussi de changer de compte et
+de se deconnecter.
 
 Connexion : trois moyens, du plus sur au moins sur, avec un avertissement
 pour les moyens a risque. Par code ou par jeton : connexion gardee en memoire
@@ -82,7 +93,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -616,14 +627,30 @@ def activer_profil(nom):
     SESSION = PROFILS[nom]
 
 
-def cle(nom):
-    """Cle de configuration du compte actif : les reglages de connexion du compte
-    de l'entreprise sont gardes a part de ceux du compte perso."""
-    return nom if PROFIL["nom"] == "perso" else f"{nom}_entreprise"
+def cle(nom, profil=None):
+    """Cle de configuration du compte actif, ou du profil donne : les reglages de
+    connexion du compte de l'entreprise sont gardes a part de ceux du compte perso."""
+    return nom if (profil or PROFIL["nom"]) == "perso" else f"{nom}_entreprise"
 
 
-def nom_compte():
-    return "perso" if PROFIL["nom"] == "perso" else "de l'entreprise"
+def nom_compte(profil=None):
+    return "perso" if (profil or PROFIL["nom"]) == "perso" else "de l'entreprise"
+
+
+# Apres une deconnexion, les menus se referment jusqu'au menu principal
+NAVIGATION = {"menu_principal": False}
+
+
+def cles_enregistrees(cfg, profil=None):
+    """Moyen, gh ou gcm, dont les cles de connexion sont enregistrees sur ce poste
+    pour le compte actif ou le profil donne, sinon None."""
+    profil = profil or PROFIL["nom"]
+    m = cfg.get(cle("cles", profil))
+    if not m and cfg.get(cle("enregistrer_connexion", profil)):
+        m = cfg.get(cle("methode", profil))
+    if not m:
+        m = PROFILS[profil]["methode"]
+    return m if m in ("gh", "gcm") else None
 EN_MEMOIRE = ("jeton", "code")  # connexions jamais enregistrees sur le poste
 NOMS_METHODES = {"gh": "GitHub CLI", "gcm": "Git Credential Manager",
                  "code": "code, en memoire seulement",
@@ -1020,6 +1047,8 @@ def configurer_identite(cfg, user):
 def demarrer_session(cfg, methode, tok, user):
     SESSION.update(token=tok, user=user, methode=methode)
     cfg[cle("methode")], cfg[cle("login")] = methode, user.get("login")
+    if methode in ("gh", "gcm"):
+        cfg[cle("cles")] = methode
     sauver(cfg)
     configurer_identite(cfg, user)
 
@@ -1135,8 +1164,9 @@ def connexion_par_code(cfg):
     return False
 
 
-def connexion_interactive(cfg):
-    """Connexion au compte GitHub : trois moyens, du plus sur au moins sur."""
+def connexion_interactive(cfg, autre_compte=False):
+    """Connexion au compte GitHub : trois moyens, du plus sur au moins sur.
+    autre_compte : les cles enregistrees sur ce poste ne servent pas."""
     code_dispo = bool(client_id(cfg))
     while True:
         print()
@@ -1163,7 +1193,7 @@ def connexion_interactive(cfg):
             warn("fermeture du programme. A eviter sur un poste partage ou pro.")
             if not ask_yn("Continuer avec ce moyen ?", False):
                 continue
-            connecte = connexion_navigateur(cfg)
+            connecte = connexion_navigateur(cfg, autre_compte)
         else:
             return False
         if connecte:
@@ -1173,8 +1203,18 @@ def connexion_interactive(cfg):
             return True
 
 
-def connexion_navigateur(cfg):
-    """Connexion interactive : ouvre le navigateur. Retourne True si connecte."""
+def connexion_navigateur(cfg, autre_compte=False):
+    """Connexion interactive : ouvre le navigateur. Les cles deja enregistrees sur
+    ce poste servent sans nouvelle autorisation, sauf pour changer de compte.
+    Retourne True si connecte."""
+    cles = None if autre_compte else cles_enregistrees(cfg)
+    if (cles == "gh" and chemin_gh()) or (cles == "gcm" and helper_gcm()):
+        tok = token_silencieux(cfg, cles)
+        code, user, _ = requete(cfg, "GET", "/user", token=tok) if tok else (0, {}, {})
+        if code == 200:
+            demarrer_session(cfg, cles, tok, user)
+            ok(f"Connecte avec les cles enregistrees sur ce poste : {user.get('login')}")
+            return True
     methode = methode_dispo(cfg)
     if not methode:
         warn("Aucun outil de connexion par le navigateur : ni GitHub CLI, ni Git Credential Manager.")
@@ -1198,6 +1238,8 @@ def connexion_navigateur(cfg):
     else:
         info("Une fenetre GitHub va s'ouvrir : choisir 'Sign in with your browser'.")
         configurer_helper_gcm(h)
+        if autre_compte:
+            oublier_gcm(cfg)
         tok = credential_gcm(cfg, interactif=True)
         code, _, _ = requete(cfg, "GET", "/user", token=tok) if tok else (0, None, None)
         if code == 401:  # identifiants memorises mais revoques : nouvelle connexion
@@ -1232,17 +1274,91 @@ def assurer_connexion(cfg, interactif=True):
     return connexion_interactive(cfg)
 
 
-def deconnexion(cfg):
-    methode = SESSION["methode"] or methode_dispo(cfg)
-    if methode == "gh":
-        subprocess.run([chemin_gh(), "auth", "logout", "-h", host(cfg)])
-    elif methode == "gcm":
-        oublier_gcm(cfg)
+def deconnexion(cfg, garder_cles=False):
+    """Deconnexion du compte actif. Sans garder_cles, les cles enregistrees sur ce
+    poste par la connexion par le navigateur sont supprimees."""
+    login = (SESSION["user"] or {}).get("login") or cfg.get(cle("login"))
+    methode = cles_enregistrees(cfg)
     SESSION.update(token="", user=None, methode=None)
-    cfg.pop(cle("login"), None)
     cfg[cle("enregistrer_connexion")] = False
+    NAVIGATION["menu_principal"] = True
+    print()
+    if not methode:
+        sauver(cfg)
+        ok(f"Deconnecte du compte GitHub {nom_compte()}.")
+        return
+    if garder_cles:
+        sauver(cfg)
+        ok(f"Deconnecte du compte GitHub {nom_compte()}.")
+        info("Les cles restent enregistrees sur ce poste : la connexion par le navigateur")
+        info("les reutilise, sans nouvelle autorisation.")
+        return
+    reste = ""
+    if methode == "gh" and chemin_gh():
+        cmd = [chemin_gh(), "auth", "logout", "-h", host(cfg)]
+        if run(cmd + ["-u", login] if login else cmd).returncode != 0 and login:
+            run(cmd)
+        reste = token_silencieux(cfg, "gh")
+    elif methode == "gcm" and helper_gcm():
+        oublier_gcm(cfg)
+        reste = token_silencieux(cfg, "gcm")
+    cfg.pop(cle("cles"), None)
+    cfg.pop(cle("login"), None)
     sauver(cfg)
-    ok("Deconnecte de GitHub" + (", connexion effacee de ce poste." if methode in ("gh", "gcm") else "."))
+    ok(f"Deconnecte du compte GitHub {nom_compte()}, cles supprimees de ce poste.")
+    if reste:
+        warn(f"{NOMS_METHODES[methode]} garde encore une connexion a {host(cfg)}, pour un autre")
+        warn("compte : la supprimer depuis cet outil si besoin.")
+
+
+def changer_moyen(cfg):
+    """Nouvelle connexion du compte actif par le moyen choisi ; la connexion
+    d'avant reste en place si la nouvelle est annulee."""
+    avant = dict(SESSION)
+    SESSION.update(token="", user=None, methode=None)
+    if connexion_interactive(cfg):
+        return True
+    SESSION.update(avant)
+    info("Connexion inchangee.")
+    return False
+
+
+def changer_compte(cfg):
+    """Connexion a un autre compte GitHub a la place du compte actif ; le compte
+    d'avant reste connecte si la nouvelle connexion est annulee."""
+    avant = dict(SESSION)
+    ancien = (avant["user"] or {}).get("login")
+    print()
+    info(f"Changer de compte GitHub {nom_compte()}, compte actuel : {ancien or 'aucun'}.")
+    info("Par code ou par le navigateur, GitHub autorise le compte ouvert dans le")
+    info("navigateur : s'y connecter d'abord au compte voulu, ou ouvrir une fenetre privee.")
+    SESSION.update(token="", user=None, methode=None)
+    if not connexion_interactive(cfg, autre_compte=True):
+        SESSION.update(avant)
+        info(f"Compte inchange : {ancien}." if ancien else "Aucun compte connecte.")
+        return False
+    nouveau = SESSION["user"].get("login")
+    if ancien and nouveau == ancien:
+        warn(f"Toujours le meme compte : {nouveau}. Se deconnecter de GitHub dans le")
+        warn("navigateur, puis recommencer.")
+    else:
+        ok(f"Compte GitHub {nom_compte()} : {nouveau}")
+    return True
+
+
+def afficher_deconnexion(cles, touches, retrait="    "):
+    """Affiche les choix de deconnexion : deux quand des cles sont enregistrees sur
+    ce poste, un seul sinon. Retourne {touche: garder les cles}."""
+    if cles:
+        libelles = (("Se deconnecter et supprimer les cles enregistrees", False),
+                    ("Se deconnecter et garder les cles enregistrees", True))
+    else:
+        libelles = (("Se deconnecter", False),)
+    choix = {}
+    for touche, (libelle, garder) in zip(touches, libelles):
+        print(f"{retrait}{touche}. {libelle}")
+        choix[touche.lower()] = garder
+    return choix
 
 
 def permission_manquante(code, hdr):
@@ -2168,6 +2284,8 @@ def act_depots(cfg):
             return
         vue = [d for d in repos if filtre.lower() in d["full_name"].lower()]
         print()
+        ligne_compte(cfg)
+        print()
         entete = f"{len(vue)} repo(s)" + (f" contenant '{filtre}'" if filtre else "")
         print(c(f"    {entete}", "1"))
         print(c(f"    {'#':>3}  {'Repo':<42} {'Visib.':<7} {'Envoi':<10}  En local", "90"))
@@ -2178,8 +2296,11 @@ def act_depots(cfg):
             loc = "oui" if d["full_name"].lower() in locaux else ""
             print(f"    {i:>3}. {nom:<42} {vis:<7} {date:<10}  {loc}")
         print()
+        print("      C. Changer de compte")
+        sorties = afficher_deconnexion(cles_enregistrees(cfg), "DG", "      ")
+        print()
         retour = "Entree pour revenir a toute la liste" if filtre else "Entree pour revenir"
-        choix = ask(f"Chercher un repo, ou saisir un numero pour le selectionner, {retour}",
+        choix = ask(f"Chercher un repo, saisir un numero pour le selectionner ou une lettre, {retour}",
                     "", obligatoire=False)
         if not choix:
             if not filtre:
@@ -2187,6 +2308,14 @@ def act_depots(cfg):
             filtre = ""
         elif choix.isdigit() and 1 <= int(choix) <= len(vue):
             menu_depot(cfg, vue[int(choix) - 1], locaux)
+        elif choix.lower() == "c":
+            changer_compte(cfg)
+            filtre = ""
+            pause()
+        elif choix.lower() in sorties:
+            deconnexion(cfg, garder_cles=sorties[choix.lower()])
+            pause()
+            return
         else:
             filtre = choix
 
@@ -2627,20 +2756,25 @@ def act_compte(cfg):
         ok(f"Connecte : {user.get('login')}, {NOMS_METHODES[SESSION['methode']]}, {host(cfg)}")
     else:
         warn(f"Non connecte a {host(cfg)}.")
+    cles = cles_enregistrees(cfg)
+    if cles:
+        info(f"Cles de connexion enregistrees sur ce poste, par {NOMS_METHODES[cles]}.")
     print()
     print("    1. Changer de moyen de connexion")
-    print("    2. Se deconnecter")
+    print("    2. Changer de compte")
     print("    3. Changer de serveur GitHub Entreprise")
     print("    4. Voir les permissions de la connexion")
+    sorties = afficher_deconnexion(cles, "56")
     print("    0. Retour")
     choix = ask("Choix", "0")
     if choix == "4":
         afficher_permissions(cfg)
     elif choix == "1":
-        SESSION.update(token="", user=None, methode=None)
-        connexion_interactive(cfg)
+        changer_moyen(cfg)
     elif choix == "2":
-        deconnexion(cfg)
+        changer_compte(cfg)
+    elif choix in sorties:
+        deconnexion(cfg, garder_cles=sorties[choix])
     elif choix == "3":
         nouveau = ask("Serveur, par exemple github.com ou github.monentreprise.com", host(cfg))
         cfg[cle("host")] = re.sub(r"^https?://", "", nouveau).strip("/").lower()
@@ -3265,17 +3399,68 @@ def ligne_compte(cfg):
             f"{NOMS_METHODES[SESSION['methode']]}, {host(cfg)}", "90"))
 
 
-def choisir_fonction(cfg):
-    titre("MENU PRINCIPAL")
-    for nom, libelle in (("perso", "perso"), ("entreprise", "de l'entreprise")):
-        user = PROFILS[nom]["user"]
-        if user:
-            print(c(f"  Compte GitHub {libelle} : {user.get('login')}", "90"))
+def compte_a_choisir(noms, action):
+    """Compte vise par un choix du menu principal : la question est posee
+    seulement quand plusieurs comptes sont concernes."""
+    if len(noms) <= 1:
+        return noms[0] if noms else None
     print()
-    print("    1. Gerer les repos GitHub")
-    print("    2. Entreprise : importer un repo, gerer les repos GitHub de l'entreprise")
-    print("    0. Quitter")
-    return {"1": "perso", "2": "entreprise"}.get(ask("Choix", "0"))
+    print(f"  {action}, pour quel compte GitHub ?")
+    for i, nom in enumerate(noms, 1):
+        user = PROFILS[nom]["user"]
+        print(f"    {i}. Compte GitHub {nom_compte(nom)}" + (f" : {user.get('login')}" if user else ""))
+    print("    0. Retour")
+    choix = ask("Choix", "0")
+    return noms[int(choix) - 1] if choix.isdigit() and 1 <= int(choix) <= len(noms) else None
+
+
+def act_moyen_principal(cfg):
+    nom = compte_a_choisir(list(PROFILS), "Changer de moyen de connexion")
+    if nom:
+        activer_profil(nom)
+        changer_moyen(cfg)
+        pause()
+
+
+def act_deconnexion_principal(cfg, garder_cles):
+    noms = [n for n in PROFILS if cles_enregistrees(cfg, n) or (PROFILS[n]["user"] and not garder_cles)]
+    nom = compte_a_choisir(noms, "Se deconnecter")
+    if nom:
+        activer_profil(nom)
+        deconnexion(cfg, garder_cles)
+        pause()
+
+
+def choisir_fonction(cfg):
+    """Menu principal. Retourne le profil de l'option choisie, ou None pour quitter."""
+    while True:
+        titre("MENU PRINCIPAL")
+        connectes = [n for n in PROFILS if PROFILS[n]["user"]]
+        avec_cles = [n for n in PROFILS if cles_enregistrees(cfg, n)]
+        for nom in PROFILS:
+            if nom in connectes or nom in avec_cles:
+                etat = PROFILS[nom]["user"].get("login") if nom in connectes else "non connecte"
+                if nom in avec_cles:
+                    etat += ", cles enregistrees sur ce poste"
+                print(c(f"  Compte GitHub {nom_compte(nom)} : {etat}", "90"))
+        print()
+        print("    1. Gerer les repos GitHub")
+        print("    2. Entreprise : importer un repo, gerer les repos GitHub de l'entreprise")
+        print("    3. Changer de moyen de connexion")
+        sorties = afficher_deconnexion(avec_cles, "45") if connectes or avec_cles else {}
+        print("    0. Quitter")
+        choix = ask("Choix", "0")
+        if choix in ("1", "2"):
+            return "perso" if choix == "1" else "entreprise"
+        if choix in ("0", "q", "quit", "exit"):
+            return None
+        if choix == "3":
+            lancer(act_moyen_principal, cfg, avec_pause=False)
+        elif choix in sorties:
+            garder = sorties[choix]
+            lancer(lambda cfg: act_deconnexion_principal(cfg, garder), cfg, avec_pause=False)
+        else:
+            warn("Choix invalide.")
 
 
 def connexion_obligatoire(cfg):
@@ -3292,7 +3477,7 @@ def connexion_obligatoire(cfg):
 
 def menu_repos(cfg, nom_menu):
     """Repos GitHub en ligne, en local et compte, pour le compte actif."""
-    while connexion_obligatoire(cfg):
+    while not NAVIGATION["menu_principal"] and connexion_obligatoire(cfg):
         titre(nom_menu)
         ligne_compte(cfg)
         print()
@@ -3315,7 +3500,7 @@ def menu_perso(cfg):
 
 
 def menu_entreprise(cfg):
-    while connexion_obligatoire(cfg):
+    while not NAVIGATION["menu_principal"] and connexion_obligatoire(cfg):
         titre("OPTION 2 : ENTREPRISE")
         ligne_compte(cfg)
         print()
@@ -3346,6 +3531,7 @@ def main():
     try:
         while True:
             option = choisir_fonction(cfg)
+            NAVIGATION["menu_principal"] = False
             if not option:
                 break
             activer_profil(option)

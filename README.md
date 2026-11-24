@@ -56,6 +56,18 @@ Une connexion gardée en mémoire s'efface à la fermeture du programme et aprè
 n'a pas, le programme la nomme : une fois ajoutée sur GitHub, elle s'applique
 au nouvel essai, sans reconnexion.
 
+Le menu principal propose aussi, sous les deux options :
+
+3. Changer de moyen de connexion : pour le compte perso ou celui de
+   l'entreprise.
+4. Se déconnecter et supprimer les clés enregistrées : les clés sont les
+   identifiants que la connexion par le navigateur garde sur le poste.
+5. Se déconnecter et garder les clés enregistrées : la prochaine connexion
+   par le navigateur les réutilise, sans nouvelle autorisation.
+
+Sans clés enregistrées, le choix 4 est simplement Se déconnecter, et le
+choix 5 n'apparaît pas.
+
 Dans chaque menu, Entrée revient en arrière d'un niveau ; au menu principal,
 Entrée quitte le programme.
 
@@ -76,6 +88,9 @@ Connexion au compte GitHub perso.
      par ligne d'un fichier.
    - Voir les accès à ce repo : le rôle du compte et ses droits.
    - Supprimer.
+   - C : changer de compte.
+   - D et G : se déconnecter en supprimant ou en gardant les clés
+     enregistrées ; sans clés, D seulement.
 2. Repos GitHub en local : la liste des repos trouvés sur l'ordinateur.
    - Envoyer : commit et push.
    - Mettre à jour : pull.
@@ -85,8 +100,8 @@ Connexion au compte GitHub perso.
    - Tous les repos d'un dossier : push ou pull de chacun, en une fois.
    - Envoyer un dossier : sans repo local, ou pour un nouveau projet ; le
      programme demande le nom, la description et la visibilité du repo.
-3. Compte GitHub : changer de moyen de connexion, se déconnecter, changer de
-   serveur, voir les permissions de la connexion.
+3. Compte GitHub : changer de moyen de connexion, changer de compte,
+   changer de serveur, voir les permissions de la connexion, se déconnecter.
 
 ### Option 2 : entreprise
 
