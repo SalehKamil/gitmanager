@@ -25,7 +25,8 @@ uv tool install https://github.com/SalehKamil/gitmanager/archive/refs/heads/main
 ```
 
 Il se lance ensuite en tapant `gitmanager`, depuis n'importe quel dossier. La
-même installation avec `--reinstall` le met à jour. Pour le désinstaller :
+même installation avec `--reinstall` le met à jour, et `gitmanager --version`
+affiche la version installée. Pour le désinstaller :
 
 ```bash
 uv tool uninstall gitmanager
@@ -36,11 +37,18 @@ s'il manque, dans la dernière version disponible, et affiche son empreinte
 SHA-256 pour la vérifier. Il demande ensuite la connexion au compte GitHub :
 sans connexion, il s'arrête.
 
-Au premier lancement, le programme demande s'il faut enregistrer la connexion
-sur le poste. Sur l'ordinateur perso, la réponse oui garde la connexion dans
-le coffre du système, avec GitHub CLI ou Git Credential Manager. Sur un poste
-partagé ou pro, la réponse non garde la connexion en mémoire seulement : elle
-s'efface à la fermeture du programme et après 15 minutes sans activité.
+La connexion propose trois moyens, du plus sûr au moins sûr, avec un
+avertissement pour les moyens à risque :
+
+- Par code : un code à saisir sur `github.com/login/device`, depuis n'importe
+  quel appareil ; la connexion reste en mémoire et vaut 8 heures. Ce moyen
+  demande l'application GitHub de gitmanager.
+- Par jeton d'accès : la connexion reste en mémoire.
+- Par le navigateur : la connexion reste enregistrée sur le poste, à éviter
+  sur un poste partagé ou pro.
+
+Une connexion gardée en mémoire s'efface à la fermeture du programme et après
+15 minutes sans activité.
 
 Le menu principal propose ensuite deux options.
 
@@ -65,8 +73,8 @@ Le menu principal propose ensuite deux options.
    - Tout mettre à jour : tous les dépôts d'un dossier en une fois.
    - Envoyer un dossier : sans dépôt local, ou pour un nouveau projet ; le
      programme demande le nom, la description et la visibilité du dépôt.
-3. Compte GitHub : connexion, déconnexion, enregistrement ou non de la
-   connexion sur le poste, changement de serveur.
+3. Compte GitHub : changer de moyen de connexion, se déconnecter, changer de
+   serveur.
 
 ### Option 2 : synchroniser un dépôt sur l'ordinateur de l'entreprise
 

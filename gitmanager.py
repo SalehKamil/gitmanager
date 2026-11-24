@@ -40,11 +40,11 @@ sans connexion, le programme s'arrete. Menu principal :
      commit + push avec le compte de l'entreprise, seconde authentification
      distincte du compte perso.
 
-Connexion : au premier lancement, le programme demande s'il faut enregistrer
-la connexion sur le poste. Oui, sur un ordinateur perso : GitHub CLI ou Git
-Credential Manager, dans le coffre du systeme. Non, sur un poste partage ou
-pro : connexion par code ou par jeton, gardee en memoire seulement, oubliee
-apres 15 minutes sans activite et a la fermeture du programme.
+Connexion : trois moyens, du plus sur au moins sur, avec un avertissement
+pour les moyens a risque. Par code ou par jeton : connexion gardee en memoire
+seulement, oubliee apres 15 minutes sans activite et a la fermeture du
+programme. Par le navigateur : GitHub CLI ou Git Credential Manager,
+connexion enregistree sur le poste, a eviter sur un poste partage ou pro.
 
 Securite : HTTPS ou SSH seulement, certificats toujours verifies, aucun
 jeton ecrit sur le disque, dans une URL ni sur la ligne de commande ; alerte
@@ -72,6 +72,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
+__version__ = "1.1.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -126,14 +127,32 @@ STATUTS = {"A": "ajoute", "M": "modifie", "D": "supprime", "R": "renomme",
 # Affichage
 
 def _ansi_on():
+    """Couleurs : console Windows avec le mode VT, terminaux Unix, Git Bash."""
+    if os.environ.get("NO_COLOR"):
+        return False
     if os.name == "nt":
         try:
             import ctypes
             k = ctypes.windll.kernel32
             k.SetConsoleMode(k.GetStdHandle(-11), 7)
         except Exception:
-            return False
-    return sys.stdout.isatty()
+            pass
+        if os.environ.get("MSYSTEM") or os.environ.get("TERM"):  # Git Bash, mintty
+            return True
+    return sys.stdout.isatty() or bool(os.environ.get("FORCE_COLOR"))
+
+
+def _sortie_utf8():
+    """Le logo utilise des blocs Unicode : sortie en UTF-8 si besoin, par
+    exemple dans Git Bash sous Windows."""
+    if "utf" not in (getattr(sys.stdout, "encoding", "") or "").lower():
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_sortie_utf8()
 
 
 COLOR = _ansi_on()
@@ -982,8 +1001,8 @@ def demarrer_session(cfg, methode, tok, user):
 def demander_secret(serveur, avec_utilisateur=False):
     """Jeton (ou mot de passe) saisi sans affichage. Il reste en memoire :
     rien n'est ecrit sur le disque. Retourne (utilisateur, secret)."""
-    info(f"Jeton GitHub a creer sur https://{serveur}/settings/tokens, de preference")
-    info("un jeton fin limite aux depots utiles. Il reste en memoire, rien n'est ecrit.")
+    info(f"Jeton a creer sur https://{serveur}/settings/tokens. Il reste en memoire,")
+    info("rien n'est ecrit sur le disque.")
     utilisateur = ask("Nom d'utilisateur, Entree pour un jeton GitHub", "",
                       obligatoire=False) if avec_utilisateur else ""
     try:
@@ -1032,7 +1051,7 @@ def ouvrir_session_memoire(cfg, methode, tok):
     """Verifie le jeton et ouvre une session gardee en memoire seulement."""
     code, user, _ = requete(cfg, "GET", "/user", token=tok)
     if code != 200:
-        err(f"Connexion refusee , code {code or 'reseau'} : {message_api(user)}")
+        err(f"Connexion refusee, code {code or 'reseau'} : {message_api(user)}")
         return False
     SESSION.update(token=tok, user=user, methode=methode)
     cfg["login"] = user.get("login")
@@ -1090,45 +1109,52 @@ def connexion_par_code(cfg):
     return False
 
 
-def connexion_memoire(cfg):
-    """Connexion jamais enregistree sur le poste : par code si l'application
-    gitmanager est configuree, sinon par jeton d'acces."""
-    if client_id(cfg):
-        if connexion_par_code(cfg):
-            return True
-        if not ask_yn("Se connecter avec un jeton d'acces a la place ?", True):
-            return False
-    return connexion_jeton(cfg)
-
-
 def connexion_interactive(cfg):
-    """Nouvelle connexion, selon le choix fait pour ce poste."""
-    if "enregistrer_connexion" not in cfg:
+    """Connexion au compte GitHub : trois moyens, du plus sur au moins sur."""
+    code_dispo = bool(client_id(cfg))
+    while True:
         print()
-        info("Sur un ordinateur perso, la connexion peut rester dans le coffre du systeme.")
-        info("Sur un poste partage ou pro, mieux vaut ne rien enregistrer : la connexion")
-        info("reste alors en memoire et s'efface a la fermeture du programme.")
-        cfg["enregistrer_connexion"] = ask_yn("Enregistrer la connexion sur ce poste ?", False)
-        sauver(cfg)
-    if cfg["enregistrer_connexion"]:
-        return connexion_navigateur(cfg)
-    return connexion_memoire(cfg)
+        print("  Connexion au compte GitHub, du moyen le plus sur au moins sur :")
+        print()
+        print("    1. Par code, gardee en memoire et valable 8 heures"
+              + ("" if code_dispo else " : pas encore disponible"))
+        print("    2. Par jeton d'acces, garde en memoire")
+        print("    3. Par le navigateur, enregistree sur ce poste")
+        print("    0. Annuler")
+        choix = ask("Choix", cfg.get("moyen_connexion") or ("1" if code_dispo else "2"))
+        if choix == "1":
+            if not code_dispo:
+                warn("La connexion par code demande l'application GitHub de gitmanager,")
+                warn("pas encore configuree : choisir un autre moyen.")
+                continue
+            connecte = connexion_par_code(cfg)
+        elif choix == "2":
+            warn("Un jeton ouvre le compte tant qu'il n'est pas revoque. Choisir un jeton fin,")
+            warn("limite aux depots utiles, qui expire vite, et ne jamais l'ecrire dans un fichier.")
+            connecte = connexion_jeton(cfg)
+        elif choix == "3":
+            warn("Moyen le moins sur : la connexion reste enregistree sur ce poste apres la")
+            warn("fermeture du programme. A eviter sur un poste partage ou pro.")
+            if not ask_yn("Continuer avec ce moyen ?", False):
+                continue
+            connecte = connexion_navigateur(cfg)
+        else:
+            return False
+        if connecte:
+            cfg["moyen_connexion"] = choix
+            cfg["enregistrer_connexion"] = choix == "3"
+            sauver(cfg)
+            return True
 
 
 def connexion_navigateur(cfg):
     """Connexion interactive : ouvre le navigateur. Retourne True si connecte."""
     methode = methode_dispo(cfg)
-    if not methode and not cfg.get("sans_gh"):
-        warn("Aucun outil de connexion par le navigateur : ni GitHub CLI, ni Git Credential Manager.")
-        if installer_outil("gh"):
-            methode = "gh"
-        else:
-            cfg["sans_gh"] = True
-            sauver(cfg)
     if not methode:
-        if ask_yn("Se connecter avec un jeton d'acces a la place ?", True):
-            return connexion_jeton(cfg)
-        return False
+        warn("Aucun outil de connexion par le navigateur : ni GitHub CLI, ni Git Credential Manager.")
+        if not installer_outil("gh"):
+            return False
+        methode = "gh"
     h = host(cfg)
     print()
     info(f"Connexion a {h} via {NOMS_METHODES[methode]}...")
@@ -1153,7 +1179,7 @@ def connexion_navigateur(cfg):
             tok = credential_gcm(cfg, interactif=True)
     code, user, _ = requete(cfg, "GET", "/user", token=tok) if tok else (0, {}, {})
     if code != 200:
-        err(f"Connexion echouee , code {code or 'reseau'} : {user.get('message', 'aucune reponse')}")
+        err(f"Connexion echouee, code {code or 'reseau'} : {user.get('message', 'aucune reponse')}")
         return False
     demarrer_session(cfg, methode, tok, user)
     ok(f"Connecte a GitHub en tant que {user.get('login')}")
@@ -1188,8 +1214,9 @@ def deconnexion(cfg):
         oublier_gcm(cfg)
     SESSION.update(token="", user=None, methode=None)
     cfg.pop("login", None)
+    cfg["enregistrer_connexion"] = False
     sauver(cfg)
-    ok("Deconnecte de GitHub.")
+    ok("Deconnecte de GitHub" + (", connexion effacee de ce poste." if methode in ("gh", "gcm") else "."))
 
 
 def api(cfg, verbe, chemin, data=None):
@@ -1217,7 +1244,7 @@ def api_liste(cfg, chemin):
     while url:
         code, rep, hdr = api(cfg, "GET", url)
         if code != 200 or not isinstance(rep, list):
-            err(f"Lecture impossible , code {code} : {message_api(rep)}")
+            err(f"Lecture impossible, code {code} : {message_api(rep)}")
             return None
         tout += rep
         m = re.search(r'<([^>]+)>;\s*rel="next"', hdr.get("Link", "") or "")
@@ -1710,7 +1737,7 @@ def creer_depot(cfg, nom, prive, org="", description=""):
         donnees["description"] = description
     code, rep, _ = api(cfg, "POST", chemin, donnees)
     if code == 201:
-        ok(f"Depot cree : {rep.get('html_url')} ({'prive' if prive else 'public'})")
+        ok(f"Depot cree : {rep.get('html_url')}, {'prive' if prive else 'public'}")
         return rep.get("clone_url")
     if code == 422 and "already exists" in json.dumps(rep):
         proprio = org or SESSION["user"]["login"]
@@ -1720,7 +1747,7 @@ def creer_depot(cfg, nom, prive, org="", description=""):
             if code2 == 200:
                 return rep2.get("clone_url")
         return None
-    err(f"Creation impossible , code {code} : {message_api(rep)}")
+    err(f"Creation impossible, code {code} : {message_api(rep)}")
     return None
 
 
@@ -1733,7 +1760,7 @@ def depot_du_projet(cfg, chemin):
         return None
     code, rep, _ = api(cfg, "GET", f"/repos/{o}/{r}")
     if code != 200:
-        err(f"Depot {o}/{r} introuvable , code {code} : {message_api(rep)}")
+        err(f"Depot {o}/{r} introuvable, code {code} : {message_api(rep)}")
         return None
     return rep
 
@@ -2180,7 +2207,7 @@ def parcourir_depot(cfg, d):
             pause()
             return
         if code != 200 or not isinstance(rep, list):
-            err(f"Lecture impossible , code {code} : {message_api(rep)}")
+            err(f"Lecture impossible, code {code} : {message_api(rep)}")
             pause()
             return
         entrees = sorted(rep, key=lambda e: (e.get("type") != "dir", e["name"].lower()))
@@ -2212,7 +2239,7 @@ def parcourir_depot(cfg, d):
 def afficher_fichier(cfg, full, chemin, ref, d):
     code, rep, _ = _contenu(cfg, full, chemin, ref)
     if code != 200 or not isinstance(rep, dict):
-        err(f"Lecture impossible , code {code} : {message_api(rep)}")
+        err(f"Lecture impossible, code {code} : {message_api(rep)}")
         return
     print()
     print(c(f"  {chemin}   {taille(rep.get('size'))}", "1"))
@@ -2222,7 +2249,7 @@ def afficher_fichier(cfg, full, chemin, ref, d):
     if code2 == 200 and isinstance(commits, list) and commits:
         cm = commits[0]["commit"]
         info(f"Dernier commit sur ce fichier : {cm['message'].splitlines()[0][:60]}"
-             f"  ({cm['author']['name']}, {cm['author']['date'][:10]})")
+             f", {cm['author']['name']}, {cm['author']['date'][:10]}")
     brut = None
     if rep.get("encoding") == "base64" and rep.get("content"):
         brut = base64.b64decode(rep["content"])
@@ -2249,7 +2276,7 @@ def voir_commits(cfg, d):
         pause()
         return
     if code != 200 or not isinstance(rep, list):
-        err(f"Lecture impossible , code {code} : {message_api(rep)}")
+        err(f"Lecture impossible, code {code} : {message_api(rep)}")
         pause()
         return
     while True:
@@ -2271,7 +2298,7 @@ def voir_commits(cfg, d):
 def details_commit(cfg, full, sha):
     code, cm, _ = api(cfg, "GET", f"/repos/{full}/commits/{sha}")
     if code != 200 or not isinstance(cm, dict):
-        err(f"Lecture impossible , code {code} : {message_api(cm)}")
+        err(f"Lecture impossible, code {code} : {message_api(cm)}")
         return
     libelles = {"added": "ajoute", "modified": "modifie", "removed": "supprime",
                 "renamed": "renomme", "changed": "modifie", "copied": "copie"}
@@ -2344,7 +2371,7 @@ def changer_visibilite(cfg, d):
         d["private"] = vers_prive
         ok(f"{d['full_name']} est maintenant {'prive' if vers_prive else 'public'}.")
     else:
-        err(f"Echec , code {code} : {message_api(rep)}")
+        err(f"Echec, code {code} : {message_api(rep)}")
 
 
 def supprimer_depot(cfg, d):
@@ -2370,7 +2397,7 @@ def supprimer_depot(cfg, d):
         info("La page des parametres s'ouvre : tout en bas, 'Delete this repository'.")
         webbrowser.open(d["html_url"] + "/settings")
         return False
-    err(f"Echec , code {code} : {message_api(rep)}")
+    err(f"Echec, code {code} : {message_api(rep)}")
     return False
 
 
@@ -2382,36 +2409,18 @@ def act_compte(cfg):
         ok(f"Connecte : {user.get('login')}, {NOMS_METHODES[SESSION['methode']]}, {host(cfg)}")
     else:
         warn(f"Non connecte a {host(cfg)}.")
-    enregistre = bool(cfg.get("enregistrer_connexion"))
-    info("Connexion enregistree sur ce poste : " + ("oui" if enregistre else "non"))
     print()
-    print("    1. " + ("Se reconnecter / changer de compte" if user else "Se connecter"))
-    print("    2. Se connecter avec un jeton d'acces")
-    print("    3. Se deconnecter")
-    print("    4. " + ("Ne plus enregistrer la connexion sur ce poste" if enregistre
-                      else "Enregistrer la connexion sur ce poste"))
-    print("    5. Changer de serveur GitHub Entreprise")
+    print("    1. Changer de moyen de connexion")
+    print("    2. Se deconnecter")
+    print("    3. Changer de serveur GitHub Entreprise")
     print("    0. Retour")
     choix = ask("Choix", "0" if user else "1")
     if choix == "1":
         SESSION.update(token="", user=None, methode=None)
         connexion_interactive(cfg)
     elif choix == "2":
-        SESSION.update(token="", user=None, methode=None)
-        connexion_jeton(cfg)
-    elif choix == "3":
         deconnexion(cfg)
-    elif choix == "4":
-        cfg["enregistrer_connexion"] = not enregistre
-        sauver(cfg)
-        if enregistre:
-            ok("La connexion ne sera plus enregistree sur ce poste.")
-            if methode_dispo(cfg) and ask_yn("Supprimer la connexion deja enregistree ?", True):
-                SESSION["methode"] = SESSION["methode"] if SESSION["methode"] in ("gh", "gcm") else None
-                deconnexion(cfg)
-        else:
-            ok("La prochaine connexion sera enregistree sur ce poste.")
-    elif choix == "5":
+    elif choix == "3":
         nouveau = ask("Serveur, par exemple github.com ou github.monentreprise.com", host(cfg))
         cfg["host"] = re.sub(r"^https?://", "", nouveau).strip("/").lower()
         sauver(cfg)
@@ -2692,12 +2701,12 @@ def remplacer_contenu(source, dest):
         try:
             supprimer_avec_dossiers_vides(os.path.join(dest, *rel.split("/")), dest)
         except OSError as e:
-            echecs.append(f"{rel} ({e.strerror or e})")
+            echecs.append(f"{rel} : {e.strerror or e}")
     for rel in a_copier:
         try:
             copier_fichier(plan["src"][rel], os.path.join(dest, *rel.split("/")), dest)
         except OSError as e:
-            echecs.append(f"{rel} ({e.strerror or e})")
+            echecs.append(f"{rel} : {e.strerror or e}")
     if echecs:
         warn(f"{len(echecs)} fichier(s) n'ont pas pu etre copies / supprimes :")
         for x in echecs[:10]:
@@ -2811,7 +2820,19 @@ def _couleur(nom, fond):
 def afficher_accueil():
     """Logo, nom et accroche, au lancement."""
     print()
-    if COLOR:
+    if not COLOR:  # sans couleurs : le trace du logo, en noir et blanc
+        lignes = []
+        for haut, bas in zip(LOGO[0::2], LOGO[1::2]):
+            ligne = "    "
+            for h, b in zip(haut, bas):
+                ph, pb = h in "bow", b in "bow"
+                ligne += "\u2588" if ph and pb else "\u2580" if ph else "\u2584" if pb else " "
+            lignes.append(ligne.rstrip())
+        try:
+            print("\n".join(lignes))
+        except UnicodeEncodeError:
+            pass
+    else:
         lignes = []
         for haut, bas in zip(LOGO[0::2], LOGO[1::2]):
             ligne = "    "
@@ -2830,7 +2851,7 @@ def afficher_accueil():
         except UnicodeEncodeError:
             pass
     print()
-    print(c("    gitmanager", "1;36"))
+    print(c(f"    gitmanager {__version__}", "1;36"))
     print(c("    Coder a la maison, pousser au bureau, gerer les depots GitHub", "36"))
     print(c("    en local comme en ligne.", "36"))
 
@@ -2873,12 +2894,10 @@ def connexion_obligatoire(cfg):
     le programme n'affiche rien d'autre."""
     while not SESSION["user"]:
         try:
-            if assurer_connexion(cfg):
-                return True
+            return assurer_connexion(cfg)
         except KeyboardInterrupt:
             print()
-        if not ask_yn("Pas de connexion au compte GitHub. Reessayer ?", True):
-            return False
+            warn("Connexion interrompue.")
     return True
 
 
@@ -2932,6 +2951,9 @@ def main():
 
 def point_entree():
     """Commande `gitmanager` (installee avec : uv tool install ...)."""
+    if "--version" in sys.argv[1:]:
+        print(f"gitmanager {__version__}")
+        return
     try:
         main()
     except (KeyboardInterrupt, EOFError):

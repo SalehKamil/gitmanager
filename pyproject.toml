@@ -1,7 +1,7 @@
 [project]
 name = "gitmanager"
-version = "1.0.0"
-description = "Code chez toi, pousse au bureau, et gere tes depots GitHub en local comme en ligne."
+dynamic = ["version"]
+description = "Coder a la maison, pousser au bureau, gerer les depots GitHub en local comme en ligne."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
@@ -19,3 +19,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["gitmanager"]
+
+[tool.setuptools.dynamic]
+version = { attr = "gitmanager.__version__" }
