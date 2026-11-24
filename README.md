@@ -58,15 +58,17 @@ au nouvel essai, sans reconnexion.
 
 Le menu principal propose aussi, sous les deux options :
 
-3. Changer de moyen de connexion : pour le compte perso ou celui de
-   l'entreprise.
+3. Se connecter : au compte perso ou à celui de l'entreprise. Avec un compte
+   connecté, ce choix devient Changer de moyen de connexion.
 4. Se déconnecter et supprimer les clés enregistrées : les clés sont les
    identifiants que la connexion par le navigateur garde sur le poste.
 5. Se déconnecter et garder les clés enregistrées : la prochaine connexion
    par le navigateur les réutilise, sans nouvelle autorisation.
 
-Sans clés enregistrées, le choix 4 est simplement Se déconnecter, et le
-choix 5 n'apparaît pas.
+Les choix pour se déconnecter apparaissent seulement avec un compte
+connecté. Sans clés enregistrées, le choix 4 est simplement Se déconnecter.
+Sans compte connecté, le choix 4 est Supprimer les clés enregistrées, s'il
+y en a.
 
 Dans chaque menu, Entrée revient en arrière d'un niveau ; au menu principal,
 Entrée quitte le programme.
