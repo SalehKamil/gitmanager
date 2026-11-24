@@ -1,7 +1,7 @@
 [project]
 name = "gitmanager"
 dynamic = ["version"]
-description = "Coder a la maison, pousser au bureau, gerer les depots GitHub en local comme en ligne."
+description = "Coder a la maison, pousser au bureau, gerer les repos GitHub en local comme en ligne."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.9"

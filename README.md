@@ -4,7 +4,7 @@
 
 Quand l'entreprise n'autorise pas le transfert de fichiers, gitmanager permet
 de travailler sur ses projets depuis l'ordinateur perso, plus confortable,
-puis de les envoyer sur l'ordinateur pro. Il sert aussi à gérer ses dépôts
+puis de les envoyer sur l'ordinateur pro. Il sert aussi à gérer ses repos
 GitHub, en local comme en ligne.
 
 C'est un petit programme Python qui remplace les commandes Git par des menus :
@@ -48,15 +48,17 @@ avertissement pour les moyens à risque :
   sur un poste partagé ou pro.
 
 Une connexion gardée en mémoire s'efface à la fermeture du programme et après
-15 minutes sans activité.
+15 minutes sans activité. Quand une action demande une permission que le jeton
+n'a pas, le programme la nomme : une fois ajoutée sur GitHub, elle s'applique
+au nouvel essai, sans reconnexion.
 
 Le menu principal propose ensuite deux options.
 
-### Option 1 : gérer les dépôts
+### Option 1 : gérer les repos
 
 À utiliser sur l'ordinateur perso.
 
-1. Gérer les dépôts GitHub : la liste des dépôts en ligne.
+1. Gérer les repos GitHub : la liste des repos en ligne.
    - Parcourir les fichiers et voir les commits.
    - Rendre public ou privé.
    - Ouvrir la copie : le dossier s'ouvre dans le gestionnaire de fichiers
@@ -64,24 +66,24 @@ Le menu principal propose ensuite deux options.
    - Cloner le projet en local, quand aucune copie n'existe.
    - Ouvrir dans le navigateur.
    - Supprimer.
-2. Gérer les dépôts locaux : la liste des dépôts trouvés sur l'ordinateur.
+2. Gérer les repos locaux : la liste des repos trouvés sur l'ordinateur.
    - Envoyer : commit et push.
    - Mettre à jour : pull.
    - Écraser : force push, GitHub prend le contenu du dossier.
    - Voir les modifications, rendre public ou privé, relier à un autre
-     dépôt, supprimer le `.git`.
-   - Tout mettre à jour : tous les dépôts d'un dossier en une fois.
-   - Envoyer un dossier : sans dépôt local, ou pour un nouveau projet ; le
-     programme demande le nom, la description et la visibilité du dépôt.
+     repo, supprimer le `.git`.
+   - Tout mettre à jour : tous les repos d'un dossier en une fois.
+   - Envoyer un dossier : sans repo local, ou pour un nouveau projet ; le
+     programme demande le nom, la description et la visibilité du repo.
 3. Compte GitHub : changer de moyen de connexion, se déconnecter, changer de
-   serveur.
+   serveur, voir les permissions de la connexion.
 
-### Option 2 : synchroniser un dépôt sur l'ordinateur de l'entreprise
+### Option 2 : synchroniser un repo sur l'ordinateur de l'entreprise
 
-À utiliser sur l'ordinateur pro. Le programme demande d'abord le dépôt à
-récupérer, par exemple `SalehKamil/nom-du-projet`. Un dépôt privé est
+À utiliser sur l'ordinateur pro. Le programme demande d'abord le repo à
+récupérer, par exemple `SalehKamil/nom-du-projet`. Un repo privé est
 récupéré avec le compte GitHub connecté. Il demande ensuite où trouver le
-dépôt de l'entreprise :
+repo de l'entreprise :
 
 1. Le dossier Git est déjà sur ce PC : indiquer son emplacement.
 2. Le cloner depuis le serveur de l'entreprise : indiquer son adresse.
@@ -100,6 +102,6 @@ La suite se fait sans chiffre à taper :
 <img src="https://img.shields.io/badge/Inactivit%C3%A9-connexion%20oubli%C3%A9e%20apr%C3%A8s%2015%20min-2ea44f" alt="Inactivité : connexion oubliée après 15 min">
 <img src="https://img.shields.io/badge/Identifiants%20en%20clair-alerte-2ea44f" alt="Identifiants en clair : alerte">
 <img src="https://img.shields.io/badge/Fichiers%20secrets-exclus%20de%20l%27envoi-2ea44f" alt="Fichiers secrets : exclus de l'envoi">
-<img src="https://img.shields.io/badge/D%C3%A9p%C3%B4t%20public-alerte%20si%20secrets-2ea44f" alt="Dépôt public : alerte si secrets">
+<img src="https://img.shields.io/badge/Repo%20public-alerte%20si%20secrets-2ea44f" alt="Repo public : alerte si secrets">
 <img src="https://img.shields.io/badge/Git-empreinte%20SHA--256%20affich%C3%A9e-2ea44f" alt="Git : empreinte SHA-256 affichée">
 </p>

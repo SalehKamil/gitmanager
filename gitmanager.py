@@ -4,12 +4,12 @@
 # dependencies = []
 # ///
 """
-gitmanager.py : coder a la maison, pousser au bureau, gerer les depots GitHub
+gitmanager.py : coder a la maison, pousser au bureau, gerer les repos GitHub
 en local comme en ligne.
 
 Quand l'entreprise n'autorise pas le transfert de fichiers, gitmanager permet
 de travailler sur ses projets depuis l'ordinateur perso, plus confortable,
-puis de les envoyer sur l'ordinateur pro. Il sert aussi a gerer les depots
+puis de les envoyer sur l'ordinateur pro. Il sert aussi a gerer les repos
 GitHub, en local comme en ligne. Il remplace les commandes Git par des menus.
 
 Au premier lancement, il installe ce qui manque (Git, GitHub CLI) dans la
@@ -25,18 +25,18 @@ Commande gitmanager sur n'importe quel poste (avec uv) :
 Au lancement : logo, accroche, puis connexion obligatoire au compte GitHub ;
 sans connexion, le programme s'arrete. Menu principal :
 
-  1. Gerer les depots, sur l'ordinateur perso
-     - Gerer les depots GitHub : fichiers, commits, public / prive, ouvrir la
+  1. Gerer les repos, sur l'ordinateur perso
+     - Gerer les repos GitHub : fichiers, commits, public / prive, ouvrir la
        copie locale ou cloner le projet en local, supprimer.
-     - Gerer les depots locaux : envoyer, c'est-a-dire commit + push ; mettre
+     - Gerer les repos locaux : envoyer, c'est-a-dire commit + push ; mettre
        a jour par pull ; ecraser par force push ; tout mettre a jour ; sans
-       depot local, envoi d'un dossier sur GitHub avec nom, description et
+       repo local, envoi d'un dossier sur GitHub avec nom, description et
        visibilite.
 
-  2. Synchroniser un depot sur l'ordinateur de l'entreprise
-     Recupere le depot GitHub dans un dossier temporaire, sans identifiant
+  2. Synchroniser un repo sur l'ordinateur de l'entreprise
+     Recupere le repo GitHub dans un dossier temporaire, sans identifiant
      s'il est public, avec le compte connecte s'il est prive ; remplace le
-     contenu du dossier git du depot de l'entreprise par ce projet, puis
+     contenu du dossier git du repo de l'entreprise par ce projet, puis
      commit + push avec le compte de l'entreprise, seconde authentification
      distincte du compte perso.
 
@@ -72,7 +72,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -429,7 +429,7 @@ def adresse_principale(chemin):
 
 
 def lien_court(url):
-    """proprietaire/depot, ou la fin de l'adresse, ou 'non relie'."""
+    """proprietaire/repo, ou la fin de l'adresse, ou 'non relie'."""
     return (cle_depot(url) or url[-30:]) if url else c("non relie", "90")
 
 
@@ -493,7 +493,7 @@ def init_depot(chemin):
     if git("init", "-b", "main", cwd=chemin)[0] != 0:  # git < 2.28
         git("init", cwd=chemin)
         git("symbolic-ref", "HEAD", "refs/heads/main", cwd=chemin, quiet=True)
-    ok(f"Depot git initialise dans {chemin}")
+    ok(f"Repo git initialise dans {chemin}")
 
 
 def lire_name_status(texte):
@@ -1130,7 +1130,7 @@ def connexion_interactive(cfg):
             connecte = connexion_par_code(cfg)
         elif choix == "2":
             warn("Un jeton ouvre le compte tant qu'il n'est pas revoque. Choisir un jeton fin,")
-            warn("limite aux depots utiles, qui expire vite, et ne jamais l'ecrire dans un fichier.")
+            warn("limite aux repos utiles, qui expire vite, et ne jamais l'ecrire dans un fichier.")
             connecte = connexion_jeton(cfg)
         elif choix == "3":
             warn("Moyen le moins sur : la connexion reste enregistree sur ce poste apres la")
@@ -1219,18 +1219,57 @@ def deconnexion(cfg):
     ok("Deconnecte de GitHub" + (", connexion effacee de ce poste." if methode in ("gh", "gcm") else "."))
 
 
+def permission_manquante(code, hdr):
+    """Permission demandee par GitHub quand il refuse une action, sinon ''."""
+    if code != 403 or not hdr or hdr.get("X-RateLimit-Remaining") == "0":
+        return ""
+    if hdr.get("X-Accepted-GitHub-Permissions"):  # jeton fin ou application GitHub
+        return hdr.get("X-Accepted-GitHub-Permissions")
+    accepte = {s.strip() for s in (hdr.get("X-Accepted-OAuth-Scopes") or "").split(",") if s.strip()}
+    possede = {s.strip() for s in (hdr.get("X-OAuth-Scopes") or "").split(",") if s.strip()}
+    return ", ".join(sorted(accepte)) if accepte and not accepte & possede else ""
+
+
+def mettre_a_jour_permissions(cfg, besoin, hdr=None):
+    """Permission manquante : la faire ajouter, puis reessayer avec le meme jeton.
+    Une permission modifiee sur GitHub s'applique sans reconnexion."""
+    warn(f"Permission manquante pour cette action : {besoin}")
+    scopes = (hdr or {}).get("X-Accepted-OAuth-Scopes") if hdr else ""
+    if SESSION["methode"] == "gh" and scopes:
+        info("GitHub CLI demande cette permission dans le navigateur.")
+        p = subprocess.run([chemin_gh(), "auth", "refresh", "-h", host(cfg), "-s",
+                            ",".join(s.strip() for s in scopes.split(",") if s.strip())])
+        if p.returncode == 0:
+            SESSION["token"] = token_silencieux(cfg, "gh")
+            return bool(SESSION["token"])
+        return False
+    if SESSION["methode"] == "code":
+        info("Ajouter cette permission a l'application GitHub de gitmanager, puis accepter")
+        info(f"la mise a jour sur https://{host(cfg)}/settings/installations.")
+    else:
+        info(f"Ajouter cette permission au jeton sur https://{host(cfg)}/settings/tokens,")
+        info("sans le regenerer : la modification s'applique tout de suite.")
+    return ask_yn("Reessayer apres la modification ?", True)
+
+
 def api(cfg, verbe, chemin, data=None):
-    """Appel API avec la session courante (reconnexion auto si expiree)."""
+    """Appel API avec la session courante : reconnexion si elle a expire, et
+    nouvel essai apres l'ajout d'une permission manquante."""
     if not assurer_connexion(cfg):
         return 0, {"message": "non connecte a GitHub"}, {}
-    code, rep, hdr = requete(cfg, verbe, chemin, data)
-    if code == 401:
-        SESSION["token"] = ""
-        if SESSION["methode"] == "gcm":
-            oublier_gcm(cfg)
-        warn("Session GitHub expiree : reconnexion.")
-        if connexion_interactive(cfg):
-            code, rep, hdr = requete(cfg, verbe, chemin, data)
+    for _ in range(3):
+        code, rep, hdr = requete(cfg, verbe, chemin, data)
+        if code == 401:
+            SESSION["token"] = ""
+            if SESSION["methode"] == "gcm":
+                oublier_gcm(cfg)
+            warn("Session GitHub expiree : reconnexion.")
+            if connexion_interactive(cfg):
+                continue
+            break
+        besoin = permission_manquante(code, hdr)
+        if not (besoin and mettre_a_jour_permissions(cfg, besoin, hdr)):
+            break
     return code, rep, hdr
 
 
@@ -1266,9 +1305,9 @@ def expliquer(sortie):
     s = (sortie or "").lower()
     perso = MODE["nom"] == "perso"
     if "repository not found" in s:
-        return "depot introuvable sur le serveur : supprime, renomme, ou droits manquants"
+        return "repo introuvable sur le serveur : supprime, renomme, ou droits manquants"
     if "permission to" in s and "denied" in s:
-        return "ce compte n'a pas le droit d'ecrire dans ce depot"
+        return "ce compte n'a pas le droit d'ecrire dans ce repo"
     if erreur_auth(sortie):
         return ("GitHub refuse l'acces : se reconnecter avec le menu Compte GitHub" if perso else
                 "le serveur refuse l'acces : verifier que 'git push' marche dans ce dossier")
@@ -1532,11 +1571,16 @@ def pousser(cfg, chemin, remote, branche, auto=False):
             return "ok", f"{recus} commit(s) recupere(s) ; le serveur est identique a ce dossier"
         return "a_jour", "rien a envoyer : le serveur a deja exactement ce contenu"
 
-    for tentative in (1, 2):
+    for tentative in (1, 2, 3):
         code, _, e = git("push", "-u", remote, branche, cwd=chemin, quiet=auto)
         if code == 0:
             break
-        if tentative == 1 and not auto and MODE["nom"] == "perso" and erreur_auth(e):
+        refus = "permission to" in e.lower() and "denied" in e.lower()
+        if tentative < 3 and not auto and MODE["nom"] == "perso" and refus \
+                and SESSION["methode"] in EN_MEMOIRE + ("gh",):
+            if mettre_a_jour_permissions(cfg, "contents=write, ecriture dans ce repo"):
+                continue
+        if tentative == 1 and not auto and MODE["nom"] == "perso" and erreur_auth(e) and not refus:
             SESSION["token"] = ""
             if connexion_interactive(cfg):
                 continue
@@ -1560,8 +1604,8 @@ def pousser(cfg, chemin, remote, branche, auto=False):
 def relier(cfg, chemin):
     if MODE["nom"] == "perso":
         return lier_a_github(cfg, chemin)
-    warn("Ce depot n'a pas d'adresse de serveur, ou remote.")
-    url = ask("URL du depot de l'entreprise, https://... ou git@..., vide pour annuler",
+    warn("Ce repo n'a pas d'adresse de serveur, ou remote.")
+    url = ask("URL du repo de l'entreprise, https://... ou git@..., vide pour annuler",
               "", obligatoire=False)
     if not url:
         return None
@@ -1586,10 +1630,10 @@ def preparer(cfg, chemin, auto, lier=True):
     remote = remote_principal(chemin)
     if not remote:
         if auto or not lier:
-            raise Arret("ignore", "pas encore relie a un depot sur le serveur")
+            raise Arret("ignore", "pas encore relie a un repo sur le serveur")
         remote = relier(cfg, chemin)
         if not remote:
-            raise Arret("erreur", "aucun depot distant associe")
+            raise Arret("erreur", "aucun repo distant associe")
     return branche, remote
 
 
@@ -1665,7 +1709,7 @@ def choisir_dossier(cfg, question="Dossier du projet", cle="dernier_dossier"):
 
 
 def trouver_projets(dossier, profondeur=2):
-    """Depots git dans ce dossier et ses sous-dossiers (2 niveaux)."""
+    """Repos git dans ce dossier et ses sous-dossiers (2 niveaux)."""
     if os.path.exists(os.path.join(dossier, ".git")):
         return [dossier]
     trouves = []
@@ -1697,17 +1741,17 @@ def index_locaux(cfg):
 
 
 def lier_a_github(cfg, chemin):
-    """Cree le depot GitHub ou relie un depot existant. Retourne 'origin'."""
+    """Cree le repo GitHub ou relie un repo existant. Retourne 'origin'."""
     print()
-    print("    1. Creer un nouveau depot sur GitHub")
-    print("    2. Le relier a un depot GitHub existant")
+    print("    1. Creer un nouveau repo sur GitHub")
+    print("    2. Le relier a un repo GitHub existant")
     print("    0. Annuler")
     choix = ask("Choix", "1")
     if choix not in ("1", "2") or not assurer_connexion(cfg):
         return None
     login = SESSION["user"]["login"]
     if choix == "2":
-        cible = ask("Depot : nom, proprietaire/nom ou URL")
+        cible = ask("Repo : nom, proprietaire/nom ou URL")
         if "://" in cible or cible.startswith("git@"):
             url = sans_identifiants(cible)
         else:
@@ -1716,10 +1760,10 @@ def lier_a_github(cfg, chemin):
             url = f"https://{host(cfg)}/{cible.removesuffix('.git')}.git"
     else:
         defaut = re.sub(r"[^A-Za-z0-9._-]+", "-", os.path.basename(chemin)).strip("-")
-        nom = ask("Nom du depot", defaut or "projet")
-        description = ask("Description du depot, facultative", "", obligatoire=False)
+        nom = ask("Nom du repo", defaut or "projet")
+        description = ask("Description du repo, facultative", "", obligatoire=False)
         org = ask("Organisation, vide pour le compte personnel", "", obligatoire=False)
-        prive = ask_yn("Depot prive ?", True)
+        prive = ask_yn("Repo prive ?", True)
         url = creer_depot(cfg, nom, prive, org, description)
         if not url:
             return None
@@ -1737,7 +1781,7 @@ def creer_depot(cfg, nom, prive, org="", description=""):
         donnees["description"] = description
     code, rep, _ = api(cfg, "POST", chemin, donnees)
     if code == 201:
-        ok(f"Depot cree : {rep.get('html_url')}, {'prive' if prive else 'public'}")
+        ok(f"Repo cree : {rep.get('html_url')}, {'prive' if prive else 'public'}")
         return rep.get("clone_url")
     if code == 422 and "already exists" in json.dumps(rep):
         proprio = org or SESSION["user"]["login"]
@@ -1752,15 +1796,15 @@ def creer_depot(cfg, nom, prive, org="", description=""):
 
 
 def depot_du_projet(cfg, chemin):
-    """Infos GitHub (API) du depot relie a ce projet, ou None."""
+    """Infos GitHub (API) du repo relie a ce projet, ou None."""
     remote = remote_principal(chemin)
     h, o, r = infos_url(url_remote(remote, chemin)) if remote else (None, None, None)
     if not o or h != host(cfg):
-        err("Ce projet n'est pas relie a un depot du compte GitHub connecte.")
+        err("Ce projet n'est pas relie a un repo du compte GitHub connecte.")
         return None
     code, rep, _ = api(cfg, "GET", f"/repos/{o}/{r}")
     if code != 200:
-        err(f"Depot {o}/{r} introuvable, code {code} : {message_api(rep)}")
+        err(f"Repo {o}/{r} introuvable, code {code} : {message_api(rep)}")
         return None
     return rep
 
@@ -1893,11 +1937,11 @@ def act_supprimer_git(cfg, chemin):
 
 
 def menu_init(cfg, chemin):
-    """Dossier sans git. Retourne True si un depot a ete cree."""
+    """Dossier sans git. Retourne True si un repo a ete cree."""
     titre("Nouveau projet git")
-    info(f"{chemin} n'est pas encore un depot git.")
+    info(f"{chemin} n'est pas encore un repo git.")
     print()
-    print("    1. git init, creation du depot GitHub, premier commit et push")
+    print("    1. git init, creation du repo GitHub, premier commit et push")
     print("    2. git init seulement")
     print("    0. Retour")
     choix = ask("Choix", "1")
@@ -1927,7 +1971,7 @@ def menu_projet(cfg, chemin):
         "5": act_visibilite_projet, "6": act_relier,
     }
     while True:
-        titre("Depot local")
+        titre("Repo local")
         entete_projet(chemin)
         relie = bool(remote_principal(chemin))
         print()
@@ -1935,8 +1979,8 @@ def menu_projet(cfg, chemin):
         print("    2. Mettre a jour")
         print("    3. Ecraser GitHub avec ce dossier")
         print("    4. Voir les modifications")
-        print("    5. Rendre le depot public / prive")
-        print("    6. " + ("Relier a un autre depot GitHub" if relie else "Relier a GitHub"))
+        print("    5. Rendre le repo public / prive")
+        print("    6. " + ("Relier a un autre repo GitHub" if relie else "Relier a GitHub"))
         print("    7. Supprimer le .git de ce dossier")
         print("    0. Retour")
         choix = ask("Choix", "0")
@@ -1995,10 +2039,10 @@ def nom_court(chemin):
 
 
 def ouvrir_dossier(cfg, chemin):
-    """Ouvre le menu d'un depot ; un dossier sans git propose de l'envoyer sur GitHub."""
+    """Ouvre le menu d'un repo ; un dossier sans git propose de l'envoyer sur GitHub."""
     racine = racine_repo(chemin)
     if racine and os.path.normcase(racine) != os.path.normcase(chemin):
-        info(f"Ce dossier fait partie du depot git : {racine}")
+        info(f"Ce dossier fait partie du repo git : {racine}")
         chemin = racine
     cfg["dernier_dossier"] = chemin
     sauver(cfg)
@@ -2007,22 +2051,22 @@ def ouvrir_dossier(cfg, chemin):
 
 def act_autre_dossier(cfg):
     titre("Envoyer un dossier sur GitHub")
-    chemin = choisir_dossier(cfg, "Dossier a envoyer ou depot non liste")
+    chemin = choisir_dossier(cfg, "Dossier a envoyer ou repo non liste")
     if chemin:
         ouvrir_dossier(cfg, chemin)
 
 
 def act_depots_locaux(cfg):
-    titre("Gerer les depots locaux")
-    info("Recherche des depots git de cet ordinateur...")
+    titre("Gerer les repos locaux")
+    info("Recherche des repos git de cet ordinateur...")
     projets = projets_de_la_machine(cfg)[:30]
     print()
     if not projets:
-        info("Aucun depot git trouve sur cet ordinateur.")
+        info("Aucun repo git trouve sur cet ordinateur.")
         if ask_yn("Envoyer un dossier sur GitHub ?", True):
             act_autre_dossier(cfg)
         return
-    print(c(f"    {'#':>3}  {'Depot':<44} {'A commiter':>10}  GitHub", "90"))
+    print(c(f"    {'#':>3}  {'Repo':<44} {'A commiter':>10}  GitHub", "90"))
     for i, (p, (url, modifs, _)) in enumerate(zip(projets, apercu_projets(projets)), 1):
         nom = nom_court(p)
         nom = nom if len(nom) <= 44 else "~" + nom[-43:]
@@ -2030,7 +2074,7 @@ def act_depots_locaux(cfg):
     print()
     print("      N. Envoyer un autre dossier sur GitHub")
     print("      T. Tout mettre a jour")
-    choix = ask("Numero d'un depot, N ou T, Entree pour revenir", "", obligatoire=False).lower()
+    choix = ask("Numero d'un repo, N ou T, Entree pour revenir", "", obligatoire=False).lower()
     if choix.isdigit() and 1 <= int(choix) <= len(projets):
         ouvrir_dossier(cfg, projets[int(choix) - 1])
     elif choix == "n":
@@ -2083,28 +2127,30 @@ def act_tout(cfg):
               "ignore": "ignore(s)", "erreur": "en erreur"}
     info("Bilan : " + ", ".join(f"{n} {resume[s]}" for s, n in bilan.items()))
     if bilan.get("conflit"):
-        info("Projets en conflit : les ouvrir dans Gerer les depots locaux et utiliser Envoyer.")
+        info("Projets en conflit : les ouvrir dans Gerer les repos locaux et utiliser Envoyer.")
 
 
-# Depots GitHub : liste, navigation, visibilite, suppression
+# Repos GitHub : liste, navigation, visibilite, suppression
 
 def act_depots(cfg):
-    titre("Depots GitHub")
+    titre("Repos GitHub")
     if not assurer_connexion(cfg):
-        return
-    info("Chargement de la liste...")
-    depots = api_liste(cfg, "/user/repos?per_page=100&sort=pushed"
-                            "&affiliation=owner,collaborator,organization_member")
-    if depots is None:
         return
     locaux = index_locaux(cfg)
     filtre = ""
     while True:
-        vue = [d for d in depots if filtre.lower() in d["full_name"].lower()]
+        # relue a chaque affichage : un repo ou une permission ajoutes au jeton
+        # sur GitHub apparaissent sans reconnexion
+        info("Chargement de la liste...")
+        repos = api_liste(cfg, "/user/repos?per_page=100&sort=pushed"
+                                "&affiliation=owner,collaborator,organization_member")
+        if repos is None:
+            return
+        vue = [d for d in repos if filtre.lower() in d["full_name"].lower()]
         print()
-        entete = f"{len(vue)} depot(s)" + (f" contenant '{filtre}'" if filtre else "")
+        entete = f"{len(vue)} repo(s)" + (f" contenant '{filtre}'" if filtre else "")
         print(c(f"    {entete}", "1"))
-        print(c(f"    {'#':>3}  {'Depot':<42} {'Visib.':<7} {'Envoi':<10}  Sur ce PC", "90"))
+        print(c(f"    {'#':>3}  {'Repo':<42} {'Visib.':<7} {'Envoi':<10}  Sur ce PC", "90"))
         for i, d in enumerate(vue, 1):
             nom = d["full_name"] if len(d["full_name"]) <= 42 else d["full_name"][:41] + "~"
             vis = "prive" if d.get("private") else "public"
@@ -2112,14 +2158,12 @@ def act_depots(cfg):
             loc = "oui" if d["full_name"].lower() in locaux else ""
             print(f"    {i:>3}. {nom:<42} {vis:<7} {date:<10}  {loc}")
         print()
-        choix = ask("Numero d'un depot, texte pour filtrer, * pour tout, Entree pour revenir",
+        choix = ask("Numero d'un repo, texte pour filtrer, * pour tout, Entree pour revenir",
                     "", obligatoire=False)
         if not choix:
             return
         if choix.isdigit() and 1 <= int(choix) <= len(vue):
-            d = vue[int(choix) - 1]
-            if menu_depot(cfg, d, locaux) == "supprime":
-                depots.remove(d)
+            menu_depot(cfg, vue[int(choix) - 1], locaux)
         else:
             filtre = "" if choix == "*" else choix
 
@@ -2148,6 +2192,9 @@ def ouvrir_explorateur(chemin):
 
 def menu_depot(cfg, d, locaux):
     while True:
+        code, frais, _ = api(cfg, "GET", f"/repos/{d['full_name']}")
+        if code == 200 and isinstance(frais, dict):
+            d = frais
         local = locaux.get(d["full_name"].lower())
         vis = "prive" if d.get("private") else "public"
         titre(f"{d['full_name']} : {vis}")
@@ -2203,7 +2250,7 @@ def parcourir_depot(cfg, d):
     while True:
         code, rep, _ = _contenu(cfg, full, chemin, ref)
         if code == 404 and not chemin:
-            info("Ce depot est vide : aucun fichier envoye pour l'instant.")
+            info("Ce repo est vide : aucun fichier envoye pour l'instant.")
             pause()
             return
         if code != 200 or not isinstance(rep, list):
@@ -2272,7 +2319,7 @@ def voir_commits(cfg, d):
     full = d["full_name"]
     code, rep, _ = api(cfg, "GET", f"/repos/{full}/commits?per_page=25")
     if code == 409:
-        info("Depot vide : aucun commit.")
+        info("Repo vide : aucun commit.")
         pause()
         return
     if code != 200 or not isinstance(rep, list):
@@ -2352,7 +2399,7 @@ def changer_visibilite(cfg, d):
         warn("Rendre public expose tout le code ET tout l'historique des commits.")
         sensibles = sensibles_sur_github(cfg, d)
         if sensibles:
-            err("Ce depot contient des fichiers secrets, qui deviendraient publics :")
+            err("Ce repo contient des fichiers secrets, qui deviendraient publics :")
             for f in sensibles[:20]:
                 print("       " + f)
             info("Les retirer et changer les secrets qu'ils contiennent avant de publier.")
@@ -2381,24 +2428,40 @@ def supprimer_depot(cfg, d):
         info("Annule.")
         return False
     code, rep, _ = api(cfg, "DELETE", f"/repos/{d['full_name']}")
-    if code == 403 and SESSION["methode"] == "gh":
-        info("GitHub demande une autorisation de plus pour supprimer : delete_repo.")
-        info("Le navigateur va s'ouvrir une derniere fois pour l'accorder.")
-        p = subprocess.run([chemin_gh(), "auth", "refresh", "-h", host(cfg),
-                            "-s", "delete_repo"])
-        if p.returncode == 0:
-            SESSION["token"] = token_silencieux(cfg, "gh")
-            code, rep, _ = api(cfg, "DELETE", f"/repos/{d['full_name']}")
     if code == 204:
         ok(f"{d['full_name']} supprime.")
         return True
     if code == 403:
-        warn("Cette connexion n'a pas le droit de supprimer des depots.")
+        warn("Cette connexion n'a pas le droit de supprimer des repos.")
         info("La page des parametres s'ouvre : tout en bas, 'Delete this repository'.")
         webbrowser.open(d["html_url"] + "/settings")
         return False
     err(f"Echec, code {code} : {message_api(rep)}")
     return False
+
+
+def afficher_permissions(cfg):
+    """Permissions de la connexion, relues sur GitHub a chaque affichage."""
+    code, _, hdr = requete(cfg, "GET", "/user")
+    if code != 200:
+        err(f"Lecture impossible, code {code}.")
+        return
+    print()
+    scopes = hdr.get("X-OAuth-Scopes")
+    if scopes:
+        info(f"Permissions du jeton : {scopes}")
+    elif SESSION["methode"] in EN_MEMOIRE:
+        info("Jeton fin : permissions choisies repo par repo sur GitHub.")
+    expiration = hdr.get("GitHub-Authentication-Token-Expiration")
+    if expiration:
+        info(f"Expiration du jeton : {expiration}")
+    repos = api_liste(cfg, "/user/repos?per_page=100"
+                           "&affiliation=owner,collaborator,organization_member")
+    if repos is not None:
+        ecriture = sum(1 for r in repos if (r.get("permissions") or {}).get("push"))
+        info(f"Repos accessibles : {len(repos)}, dont {ecriture} en ecriture.")
+    info("Ces informations sont relues a chaque fois : une permission modifiee sur")
+    info("GitHub s'applique sans reconnexion.")
 
 
 def act_compte(cfg):
@@ -2413,9 +2476,12 @@ def act_compte(cfg):
     print("    1. Changer de moyen de connexion")
     print("    2. Se deconnecter")
     print("    3. Changer de serveur GitHub Entreprise")
+    print("    4. Voir les permissions de la connexion")
     print("    0. Retour")
     choix = ask("Choix", "0" if user else "1")
-    if choix == "1":
+    if choix == "4":
+        afficher_permissions(cfg)
+    elif choix == "1":
         SESSION.update(token="", user=None, methode=None)
         connexion_interactive(cfg)
     elif choix == "2":
@@ -2428,7 +2494,7 @@ def act_compte(cfg):
         connexion_interactive(cfg)
 
 
-# Ordinateur entreprise : depot recupere depuis GitHub -> depot de l'entreprise
+# Ordinateur entreprise : repo recupere depuis GitHub -> repo de l'entreprise
 
 def verifier_url(url):
     """Refuse les adresses non chiffrees (http://, git://) et retire tout
@@ -2440,7 +2506,7 @@ def verifier_url(url):
 
 
 def url_source(saisie):
-    """proprietaire/nom -> depot GitHub ; sinon URL https / SSH ou dossier local."""
+    """proprietaire/nom -> repo GitHub ; sinon URL https / SSH ou dossier local."""
     s = saisie.strip().strip('"').strip("'")
     local = nettoyer_chemin(s)
     if os.path.isdir(local):
@@ -2464,7 +2530,7 @@ def assurer_acces_entreprise(cible, cwd=None):
     compte perso. Les identifiants deja presents sur ce PC sont essayes d'abord."""
     acces, e = acces_ok(cible, cwd)
     if acces:
-        ok("Acces au depot de l'entreprise verifie.")
+        ok("Acces au repo de l'entreprise verifie.")
         return
     url = url_remote(cible, cwd) if cwd else cible
     if not (erreur_auth(e) or "not found" in e.lower()):
@@ -2505,7 +2571,7 @@ def assurer_acces_entreprise(cible, cwd=None):
 
 
 def cloner_depot_entreprise(cfg):
-    url = verifier_url(ask("URL du depot de l'entreprise, https://... ou git@...",
+    url = verifier_url(ask("URL du repo de l'entreprise, https://... ou git@...",
                            cfg.get("url_entreprise", "")))
     cfg["url_entreprise"] = url
     sauver(cfg)
@@ -2519,7 +2585,7 @@ def cloner_depot_entreprise(cfg):
         if (cle_depot(actuel) or actuel) == (cle_depot(url) or url):
             info(f"Deja clone dans {dest} : ce dossier est reutilise.")
             return dest
-        raise Arret("erreur", f"{dest} contient deja un autre depot git")
+        raise Arret("erreur", f"{dest} contient deja un autre repo git")
     if os.path.exists(dest) and (not os.path.isdir(dest) or os.listdir(dest)):
         raise Arret("erreur", f"{dest} existe deja et n'est pas vide")
     os.makedirs(parent, exist_ok=True)
@@ -2527,15 +2593,15 @@ def cloner_depot_entreprise(cfg):
         raise Arret("erreur", "clone impossible : verifier l'adresse et les droits")
     cfg["espace_entreprise"] = parent
     sauver(cfg)
-    ok(f"Depot de l'entreprise clone dans {dest}")
+    ok(f"Repo de l'entreprise clone dans {dest}")
     return dest
 
 
 def choisir_destination(cfg):
-    """Dossier git du depot de l'entreprise : deja present, ou clone maintenant."""
+    """Dossier git du repo de l'entreprise : deja present, ou clone maintenant."""
     defaut = cfg.get("destination", "")
     print()
-    print("    1. Le dossier git du depot de l'entreprise est deja sur ce PC")
+    print("    1. Le dossier git du repo de l'entreprise est deja sur ce PC")
     print("    2. Le cloner depuis le serveur de l'entreprise")
     choix = ask("Choix", "1" if defaut else "2")
     if choix == "1":
@@ -2546,14 +2612,14 @@ def choisir_destination(cfg):
         raise Arret("ignore", "annule")
     racine = racine_repo(dest) if os.path.isdir(dest) else None
     if racine is None:
-        raise Arret("erreur", f"aucun depot git dans {dest} : choisir 2 pour le cloner")
+        raise Arret("erreur", f"aucun repo git dans {dest} : choisir 2 pour le cloner")
     cfg["destination"] = dest
     sauver(cfg)
     return dest, racine
 
 
 def recuperer_source(cfg, url, dossier):
-    """Clone leger (dernier commit seulement) du depot a recuperer : sans
+    """Clone leger (dernier commit seulement) du repo a recuperer : sans
     identifiant s'il est public, sinon avec le compte GitHub connecte.
     Retourne (dossier du projet, True si un jeton a servi)."""
     cible = os.path.join(dossier, "projet")
@@ -2566,10 +2632,10 @@ def recuperer_source(cfg, url, dossier):
             raise Arret("erreur", "recuperation impossible : " + expliquer(e))
         serveur = infos_url(url)[0] or "github.com"
         if SESSION["token"] and serveur == host(cfg):
-            info("Depot prive : recuperation avec le compte GitHub connecte.")
+            info("Repo prive : recuperation avec le compte GitHub connecte.")
             jeton = SESSION["token"]
         else:
-            warn("Ce depot n'est pas accessible sans identifiants : il est prive, ou son")
+            warn("Ce repo n'est pas accessible sans identifiants : il est prive, ou son")
             warn("nom est faux.")
             print("    1. Se connecter au compte perso pour cette recuperation seulement")
             print("    0. Annuler")
@@ -2584,7 +2650,7 @@ def recuperer_source(cfg, url, dossier):
             raise Arret("erreur", "recuperation impossible : " + expliquer(e))
         avec_jeton = True
     if not a_des_commits(cible):
-        raise Arret("erreur", "le depot recupere est vide")
+        raise Arret("erreur", "le repo recupere est vide")
     _, dernier, _ = git("log", "-1", "--format=%h  %s", cwd=cible, quiet=True)
     ok(f"Recupere : {cle_depot(url) or url}, dernier commit {dernier}")
     return cible, avec_jeton
@@ -2646,10 +2712,10 @@ def dans_dossier(chemin, racine):
 
 
 def copier_fichier(src, dst, racine):
-    """Copie sans jamais ecrire hors du depot (lien symbolique piege)."""
+    """Copie sans jamais ecrire hors du repo (lien symbolique piege)."""
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     if not dans_dossier(os.path.dirname(dst), racine):
-        raise OSError("chemin hors du depot, par un lien symbolique")
+        raise OSError("chemin hors du repo, par un lien symbolique")
     if os.path.islink(dst):
         os.remove(dst)
     elif os.path.isfile(dst) and not os.access(dst, os.W_OK):
@@ -2659,7 +2725,7 @@ def copier_fichier(src, dst, racine):
 
 def supprimer_avec_dossiers_vides(fichier, limite):
     if not dans_dossier(os.path.dirname(fichier), limite):
-        raise OSError("chemin hors du depot, par un lien symbolique")
+        raise OSError("chemin hors du repo, par un lien symbolique")
     os.remove(fichier)
     d = os.path.dirname(fichier)
     limite = os.path.normcase(os.path.abspath(limite))
@@ -2677,13 +2743,13 @@ def remplacer_contenu(source, dest):
     plan = plan_copie(source, dest)
     a_copier, a_supprimer = plan["nouveaux"] + plan["modifies"], plan["en_trop"]
     print()
-    info("Comparaison avec le depot de l'entreprise :")
+    info("Comparaison avec le repo de l'entreprise :")
     print(f"       {plan['identiques']:>5} identique(s)")
     print(f"       {len(plan['modifies']):>5} modifie(s)")
     print(f"       {len(plan['nouveaux']):>5} nouveau(x)")
     print(f"       {len(a_supprimer):>5} a supprimer, absents du projet recupere")
     if not a_copier and not a_supprimer:
-        info("Le depot de l'entreprise contient deja exactement ce projet.")
+        info("Le repo de l'entreprise contient deja exactement ce projet.")
         return True
     print()
     for libelle, liste in (("modifie ", plan["modifies"]), ("nouveau ", plan["nouveaux"]),
@@ -2693,7 +2759,7 @@ def remplacer_contenu(source, dest):
         if len(liste) > 20:
             print(f"       ... et {len(liste) - 20} autre(s)")
     print()
-    if not ask_yn(f"Remplacer le contenu du depot de l'entreprise : {len(a_copier)} "
+    if not ask_yn(f"Remplacer le contenu du repo de l'entreprise : {len(a_copier)} "
                   f"copie(s), {len(a_supprimer)} suppression(s) ?", True):
         return False
     echecs = []
@@ -2741,11 +2807,11 @@ def mettre_a_jour_destination(cfg, racine, remote, branche):
 
 
 def act_synchroniser(cfg):
-    titre("Synchroniser un depot sur l'ordinateur de l'entreprise")
-    info("Le depot GitHub est recupere, puis envoye dans le depot de")
+    titre("Synchroniser un repo sur l'ordinateur de l'entreprise")
+    info("Le repo GitHub est recupere, puis envoye dans le repo de")
     info("l'entreprise avec le compte de l'entreprise.")
     print()
-    saisie = ask("Depot a recuperer : proprietaire/nom, URL ou dossier",
+    saisie = ask("Repo a recuperer : proprietaire/nom, URL ou dossier",
                  cfg.get("source_depot", ""))
     url = url_source(saisie)
     cfg["source_depot"] = saisie
@@ -2754,13 +2820,13 @@ def act_synchroniser(cfg):
     branche, remote = preparer(cfg, racine, auto=False)
     assurer_acces_entreprise(remote, cwd=racine)
     adresse = url_remote(remote, racine)
-    info(f"Depot de l'entreprise : {url_web(adresse) or adresse}   branche {branche}")
+    info(f"Repo de l'entreprise : {url_web(adresse) or adresse}   branche {branche}")
     mettre_a_jour_destination(cfg, racine, remote, branche)
     temp = tempfile.mkdtemp(prefix="gitmanager-")
     try:
         source, avec_jeton = recuperer_source(cfg, url, temp)
         if not remplacer_contenu(source, dest):
-            return "ignore", "annule : le depot de l'entreprise n'a pas ete modifie"
+            return "ignore", "annule : le repo de l'entreprise n'a pas ete modifie"
         print()
         committer(cfg, racine, proposer_gitignore=False)
         statut, detail = pousser(cfg, racine, remote, branche)
@@ -2768,7 +2834,7 @@ def act_synchroniser(cfg):
         supprimer_dossier(temp)  # aucune copie du projet ne reste sur le disque
         MODE.update(utilisateur="", jeton="")
     if statut == "ok" and not avec_jeton and url.startswith("https://github.com/"):
-        info("Penser a repasser le depot en prive depuis l'ordinateur perso, s'il")
+        info("Penser a repasser le repo en prive depuis l'ordinateur perso, s'il")
         info("n'a pas a rester public.")
     return statut, detail
 
@@ -2852,7 +2918,7 @@ def afficher_accueil():
             pass
     print()
     print(c(f"    gitmanager {__version__}", "1;36"))
-    print(c("    Coder a la maison, pousser au bureau, gerer les depots GitHub", "36"))
+    print(c("    Coder a la maison, pousser au bureau, gerer les repos GitHub", "36"))
     print(c("    en local comme en ligne.", "36"))
 
 
@@ -2878,8 +2944,8 @@ def choisir_fonction(cfg):
     titre("MENU PRINCIPAL")
     ligne_compte(cfg)
     print()
-    print("    1. Gerer les depots")
-    print("    2. Synchroniser un depot sur l'ordinateur de l'entreprise")
+    print("    1. Gerer les repos")
+    print("    2. Synchroniser un repo sur l'ordinateur de l'entreprise")
     print("    0. Quitter")
     choix = ask("Choix", "2" if cfg.get("mode") == "entreprise" else "1")
     if choix not in ("1", "2"):
@@ -2903,11 +2969,11 @@ def connexion_obligatoire(cfg):
 
 def menu_perso(cfg):
     while connexion_obligatoire(cfg):
-        titre("OPTION 1 : GERER LES DEPOTS")
+        titre("OPTION 1 : GERER LES REPOS")
         ligne_compte(cfg)
         print()
-        print("    1. Gerer les depots GitHub")
-        print("    2. Gerer les depots locaux")
+        print("    1. Gerer les repos GitHub")
+        print("    2. Gerer les repos locaux")
         print("    3. Compte GitHub")
         print("    0. Retour")
         choix = saisie(c("\n  Choix : ", "1;33")).strip()
