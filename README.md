@@ -41,15 +41,11 @@ perso pour l'option 1, le compte de l'entreprise pour l'option 2. Les deux
 comptes restent séparés. Sans connexion, le programme revient au menu
 principal.
 
-La connexion propose trois moyens, du plus sûr au moins sûr, avec un
-avertissement pour les moyens à risque :
+La connexion propose deux moyens :
 
-- Par code : un code à saisir sur `github.com/login/device`, depuis n'importe
-  quel appareil ; la connexion reste en mémoire et vaut 8 heures. Ce moyen
-  demande l'application GitHub de gitmanager.
-- Par jeton d'accès : la connexion reste en mémoire.
-- Par le navigateur : la connexion reste enregistrée sur le poste, à éviter
-  sur un poste partagé ou pro.
+1. Par le navigateur : le compte est enregistré sur la machine. Un
+   avertissement le rappelle avant la connexion.
+2. Par jeton d'accès : la connexion reste en mémoire.
 
 Une connexion gardée en mémoire s'efface à la fermeture du programme et après
 15 minutes sans activité. Quand une action demande une permission que le jeton
@@ -60,15 +56,15 @@ Le menu principal propose aussi, sous les deux options :
 
 3. Se connecter : au compte perso ou à celui de l'entreprise. Avec un compte
    connecté, ce choix devient Changer de moyen de connexion.
-4. Se déconnecter et supprimer les clés enregistrées : les clés sont les
-   identifiants que la connexion par le navigateur garde sur le poste.
-5. Se déconnecter et garder les clés enregistrées : la prochaine connexion
-   par le navigateur les réutilise, sans nouvelle autorisation.
+4. Se déconnecter : seulement avec un compte connecté. Le programme demande
+   ensuite quoi faire du compte enregistré sur la machine.
+   - Le garder : la prochaine connexion par le navigateur le réutilise.
+   - Le supprimer : clés de connexion, identifiants en clair, identité des
+     commits et réglages du compte sont effacés. Aucune trace ne reste sur la
+     machine.
 
-Les choix pour se déconnecter apparaissent seulement avec un compte
-connecté. Sans clés enregistrées, le choix 4 est simplement Se déconnecter.
-Sans compte connecté, le choix 4 est Supprimer les clés enregistrées, s'il
-y en a.
+Un compte enregistré mais non connecté se supprime avec le choix Supprimer
+le compte enregistré sur cette machine.
 
 Dans chaque menu, Entrée revient en arrière d'un niveau ; au menu principal,
 Entrée quitte le programme.
@@ -91,8 +87,7 @@ Connexion au compte GitHub perso.
    - Voir les accès à ce repo : le rôle du compte et ses droits.
    - Supprimer.
    - C : changer de compte.
-   - D et G : se déconnecter en supprimant ou en gardant les clés
-     enregistrées ; sans clés, D seulement.
+   - D : se déconnecter, en gardant ou en supprimant le compte enregistré.
 2. Repos GitHub en local : la liste des repos trouvés sur l'ordinateur.
    - Envoyer : commit et push.
    - Mettre à jour : pull.
@@ -136,6 +131,7 @@ Connexion au compte GitHub de l'entreprise.
 <img src="https://img.shields.io/badge/Poste%20pro-aucune%20connexion%20enregistr%C3%A9e-2ea44f" alt="Poste pro : aucune connexion enregistrée">
 <img src="https://img.shields.io/badge/Inactivit%C3%A9-connexion%20oubli%C3%A9e%20apr%C3%A8s%2015%20min-2ea44f" alt="Inactivité : connexion oubliée après 15 min">
 <img src="https://img.shields.io/badge/Identifiants%20en%20clair-alerte-2ea44f" alt="Identifiants en clair : alerte">
+<img src="https://img.shields.io/badge/Compte%20supprim%C3%A9-aucune%20trace-2ea44f" alt="Compte supprimé : aucune trace">
 <img src="https://img.shields.io/badge/Fichiers%20secrets-exclus%20de%20l%27envoi-2ea44f" alt="Fichiers secrets : exclus de l'envoi">
 <img src="https://img.shields.io/badge/Repo%20public-alerte%20si%20secrets-2ea44f" alt="Repo public : alerte si secrets">
 <img src="https://img.shields.io/badge/Git-empreinte%20SHA--256%20affich%C3%A9e-2ea44f" alt="Git : empreinte SHA-256 affichée">

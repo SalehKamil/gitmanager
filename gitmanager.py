@@ -52,21 +52,22 @@ menu principal. Les deux comptes restent separes.
 
   3. Se connecter, au compte perso ou a celui de l'entreprise ; avec un
      compte connecte : Changer de moyen de connexion.
-  4. Se deconnecter et supprimer les cles enregistrees sur ce poste.
-  5. Se deconnecter et garder les cles enregistrees : la connexion par le
-     navigateur les reutilise.
-  Se deconnecter apparait seulement avec un compte connecte : un seul choix
-  4 sans cles enregistrees. Sans compte connecte, le choix 4 supprime les
-  cles enregistrees, s'il y en a.
+  4. Se deconnecter, seulement avec un compte connecte. Le programme demande
+     ensuite s'il faut garder le compte enregistre sur cette machine ou le
+     supprimer : cles de connexion, identifiants en clair, identite des
+     commits et reglages du compte effaces, sans trace.
+  Un compte enregistre mais non connecte se supprime avec le choix
+  Supprimer le compte enregistre sur cette machine.
 
 La liste des repos GitHub en ligne propose aussi de changer de compte et
 de se deconnecter.
 
-Connexion : trois moyens, du plus sur au moins sur, avec un avertissement
-pour les moyens a risque. Par code ou par jeton : connexion gardee en memoire
-seulement, oubliee apres 15 minutes sans activite et a la fermeture du
-programme. Par le navigateur : GitHub CLI ou Git Credential Manager,
-connexion enregistree sur le poste, a eviter sur un poste partage ou pro.
+Connexion : 1. par le navigateur, avec GitHub CLI ou Git Credential
+Manager : le compte est enregistre sur cette machine, un avertissement le
+rappelle. 2. par jeton d'acces : connexion gardee en memoire seulement,
+oubliee apres 15 minutes sans activite et a la fermeture du programme. La
+connexion par code apparait quand l'application GitHub de gitmanager est
+configuree.
 
 Securite : HTTPS ou SSH seulement, certificats toujours verifies, aucun
 jeton ecrit sur le disque, dans une URL ni sur la ligne de commande ; alerte
@@ -95,7 +96,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.2.1"
+__version__ = "2.3.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -660,8 +661,8 @@ NOMS_METHODES = {"gh": "GitHub CLI", "gcm": "Git Credential Manager",
 _CACHE_GCM = []
 
 
-def host(cfg):
-    return (cfg.get(cle("host")) or "github.com").strip().lower()
+def host(cfg, profil=None):
+    return (cfg.get(cle("host", profil)) or "github.com").strip().lower()
 
 
 def api_base(cfg):
@@ -1032,6 +1033,27 @@ def identite_par_defaut(cfg, user, cle):
     return user.get("email") or ""
 
 
+def ecrire_identite(cfg, cle_git, valeur):
+    """Ecrit user.name ou user.email dans la configuration globale de Git et note
+    que gitmanager l'a ecrit pour ce compte : la suppression du compte l'efface."""
+    git("config", "--global", cle_git, valeur, quiet=True)
+    cfg.setdefault("identite_ecrite", {})[cle_git] = {"valeur": valeur, "profil": PROFIL["nom"]}
+    sauver(cfg)
+
+
+def identite_ecrite(cfg, profil=None):
+    """Cles user.name / user.email ecrites par gitmanager pour ce compte et
+    toujours en place avec la meme valeur."""
+    profil = profil or PROFIL["nom"]
+    restes = []
+    for cle_git, note in (cfg.get("identite_ecrite") or {}).items():
+        if note.get("profil") == profil:
+            _, val, _ = git("config", "--global", "--get", cle_git, quiet=True)
+            if val.strip() == note.get("valeur"):
+                restes.append(cle_git)
+    return restes
+
+
 def configurer_identite(cfg, user):
     """Renseigne user.name / user.email globaux s'ils manquent."""
     for cle in ("user.name", "user.email"):
@@ -1039,7 +1061,7 @@ def configurer_identite(cfg, user):
         if val.strip():
             continue
         valeur = identite_par_defaut(cfg, user, cle) or ask("Email pour les commits")
-        git("config", "--global", cle, valeur, quiet=True)
+        ecrire_identite(cfg, cle, valeur)
         ok(f"git {cle} = {valeur}")
     _, branche, _ = git("config", "--global", "--get", "init.defaultBranch", quiet=True)
     if not branche.strip():
@@ -1111,8 +1133,6 @@ def ouvrir_session_memoire(cfg, methode, tok):
         err(f"Connexion refusee, code {code or 'reseau'} : {message_api(user)}")
         return False
     SESSION.update(token=tok, user=user, methode=methode)
-    cfg[cle("login")] = user.get("login")
-    sauver(cfg)
     configurer_identite(cfg, user)
     ok(f"Connecte a GitHub : {user.get('login')}, connexion gardee en memoire seulement.")
     return True
@@ -1167,40 +1187,41 @@ def connexion_par_code(cfg):
 
 
 def connexion_interactive(cfg, autre_compte=False):
-    """Connexion au compte GitHub : trois moyens, du plus sur au moins sur.
-    autre_compte : les cles enregistrees sur ce poste ne servent pas."""
+    """Connexion au compte GitHub : par le navigateur, puis par jeton. La
+    connexion par code apparait seulement quand l'application GitHub de
+    gitmanager est configuree. autre_compte : les cles enregistrees sur cette
+    machine ne servent pas."""
     code_dispo = bool(client_id(cfg))
     while True:
         print()
-        print(f"  Connexion au compte GitHub {nom_compte()}, du moyen le plus sur au moins sur :")
+        print(f"  Connexion au compte GitHub {nom_compte()} :")
         print()
-        print("    1. Par code, gardee en memoire et valable 8 heures"
-              + ("" if code_dispo else " : pas encore disponible"))
+        print("    1. Par le navigateur, compte enregistre sur cette machine")
         print("    2. Par jeton d'acces, garde en memoire")
-        print("    3. Par le navigateur, enregistree sur ce poste")
+        if code_dispo:
+            print("    3. Par code, garde en memoire et valable 8 heures")
         print("    0. Annuler")
         choix = ask("Choix", "0")
         if choix == "1":
-            if not code_dispo:
-                warn("La connexion par code demande l'application GitHub de gitmanager,")
-                warn("pas encore configuree : choisir un autre moyen.")
+            warn("Le compte connecte sera enregistre sur cette machine. A la deconnexion, le")
+            warn("programme propose de le garder, ou de le supprimer sans laisser de trace.")
+            if not ask_yn("Continuer ?", True):
                 continue
-            connecte = connexion_par_code(cfg)
+            connecte = connexion_navigateur(cfg, autre_compte)
         elif choix == "2":
             warn("Un jeton ouvre le compte tant qu'il n'est pas revoque. Choisir un jeton fin,")
             warn("limite aux repos utiles, qui expire vite, et ne jamais l'ecrire dans un fichier.")
             connecte = connexion_jeton(cfg)
-        elif choix == "3":
-            warn("Moyen le moins sur : la connexion reste enregistree sur ce poste apres la")
-            warn("fermeture du programme. A eviter sur un poste partage ou pro.")
-            if not ask_yn("Continuer avec ce moyen ?", False):
-                continue
-            connecte = connexion_navigateur(cfg, autre_compte)
-        else:
+        elif choix == "3" and code_dispo:
+            connecte = connexion_par_code(cfg)
+        elif choix in ("0", "q"):
             return False
+        else:
+            warn("Choix invalide.")
+            continue
         if connecte:
-            cfg[cle("moyen_connexion")] = choix
-            cfg[cle("enregistrer_connexion")] = choix == "3"
+            cfg[cle("enregistrer_connexion")] = choix == "1"
+            cfg.pop(cle("moyen_connexion"), None)
             sauver(cfg)
             return True
 
@@ -1215,7 +1236,7 @@ def connexion_navigateur(cfg, autre_compte=False):
         code, user, _ = requete(cfg, "GET", "/user", token=tok) if tok else (0, {}, {})
         if code == 200:
             demarrer_session(cfg, cles, tok, user)
-            ok(f"Connecte avec les cles enregistrees sur ce poste : {user.get('login')}")
+            ok(f"Connecte avec le compte enregistre sur cette machine : {user.get('login')}")
             return True
     methode = methode_dispo(cfg)
     if not methode:
@@ -1276,59 +1297,181 @@ def assurer_connexion(cfg, interactif=True):
     return connexion_interactive(cfg)
 
 
-def deconnexion(cfg, garder_cles=False):
-    """Deconnexion du compte actif. Sans garder_cles, les cles enregistrees sur ce
-    poste par la connexion par le navigateur sont supprimees."""
+def deconnexion(cfg):
+    """Deconnexion du compte actif. Quand le compte a laisse des traces sur cette
+    machine, le programme propose de le garder ou de le supprimer. Retourne
+    False si la deconnexion est annulee."""
     login = (SESSION["user"] or {}).get("login") or cfg.get(cle("login"))
-    methode = cles_enregistrees(cfg)
+    traces = traces_compte(cfg)
+    supprimer = False
+    if traces:
+        print()
+        info(f"Enregistre sur cette machine pour le compte GitHub {nom_compte()} {login or ''} :")
+        for t in traces:
+            print(f"       - {t}")
+        print()
+        print("  Garder le compte sur cette machine ?")
+        print("    1. Le garder" + (" : la prochaine connexion par le navigateur le reutilise"
+                                     if cles_enregistrees(cfg) else ""))
+        print("    2. Le supprimer : aucune trace ne reste sur cette machine")
+        print("    0. Annuler la deconnexion")
+        choix = ask("Choix", "0")
+        if choix not in ("1", "2"):
+            info("Deconnexion annulee.")
+            return False
+        supprimer = choix == "2"
     SESSION.update(token="", user=None, methode=None)
-    cfg[cle("enregistrer_connexion")] = False
     NAVIGATION["menu_principal"] = True
     print()
-    if not methode:
+    ok(f"Deconnecte du compte GitHub {nom_compte()}.")
+    if supprimer:
+        supprimer_compte(cfg, login)
+    else:
+        cfg[cle("enregistrer_connexion")] = False
         sauver(cfg)
-        ok(f"Deconnecte du compte GitHub {nom_compte()}.")
-        return
-    if garder_cles:
-        sauver(cfg)
-        ok(f"Deconnecte du compte GitHub {nom_compte()}.")
-        info("Les cles restent enregistrees sur ce poste : la connexion par le navigateur")
-        info("les reutilise, sans nouvelle autorisation.")
-        return
-    effacer_cles(cfg, methode, login)
-    ok(f"Deconnecte du compte GitHub {nom_compte()}, cles supprimees de ce poste.")
+        info("Le compte reste enregistre sur cette machine." if traces
+             else "Rien n'etait enregistre sur cette machine pour ce compte.")
+    return True
 
 
-def effacer_cles(cfg, methode, login=None):
-    """Supprime de ce poste les cles de connexion du compte actif, enregistrees
-    par GitHub CLI ou Git Credential Manager."""
-    reste = ""
-    if methode == "gh" and chemin_gh():
-        cmd = [chemin_gh(), "auth", "logout", "-h", host(cfg)]
-        if run(cmd + ["-u", login] if login else cmd).returncode != 0 and login:
-            run(cmd)
-        reste = token_silencieux(cfg, "gh")
-    elif methode == "gcm" and helper_gcm():
-        oublier_gcm(cfg)
-        reste = token_silencieux(cfg, "gcm")
-    cfg.pop(cle("cles"), None)
-    cfg.pop(cle("login"), None)
-    cfg[cle("enregistrer_connexion")] = False
-    sauver(cfg)
-    if reste:
-        warn(f"{NOMS_METHODES[methode]} garde encore une connexion a {host(cfg)}, pour un autre")
-        warn("compte : la supprimer depuis cet outil si besoin.")
+def fichiers_identifiants():
+    """Fichiers ou Git peut ecrire des identifiants en clair."""
+    xdg = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return [Path.home() / ".git-credentials", Path(xdg) / "git" / "credentials"]
 
 
-def supprimer_cles(cfg):
-    """Sans connexion en cours : supprime les cles enregistrees sur ce poste."""
+def identifiants_en_clair(serveur, login):
+    """Lignes d'identifiants en clair de ce compte : liste de (fichier, ligne)."""
+    trouves = []
+    for fichier in fichiers_identifiants():
+        try:
+            lignes = fichier.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for ligne in lignes:
+            try:
+                u = urllib.parse.urlsplit(ligne.strip())
+                if (u.hostname or "").lower() == serveur and \
+                        urllib.parse.unquote(u.username or "").lower() == login.lower():
+                    trouves.append((fichier, ligne))
+            except ValueError:
+                continue
+    return trouves
+
+
+def traces_compte(cfg, profil=None):
+    """Ce qui reste du compte sur cette machine : cles de connexion, identifiants
+    en clair, identite des commits ecrite par gitmanager, nom du compte dans la
+    configuration de gitmanager."""
+    profil = profil or PROFIL["nom"]
+    login = (PROFILS[profil]["user"] or {}).get("login") or cfg.get(cle("login", profil))
+    traces = []
+    m = cles_enregistrees(cfg, profil)
+    if m:
+        traces.append(f"cles de connexion, par {NOMS_METHODES[m]}")
+    if login and identifiants_en_clair(host(cfg, profil), login):
+        traces.append("identifiants en clair, dans le fichier credentials de Git")
+    ident = identite_ecrite(cfg, profil)
+    if ident:
+        traces.append("identite des commits dans la configuration de Git : " + ", ".join(ident))
+    if any(cfg.get(cle(k, profil)) for k in ("login", "methode", "cles")):
+        traces.append("nom du compte dans la configuration de gitmanager")
+    return traces
+
+
+def retirer_helper(serveur, motif):
+    """Retire de la configuration globale de Git l'aide de connexion pour ce
+    serveur dont la valeur contient motif, et la ligne vide qui la precede."""
+    for cle_git in (f"credential.https://{serveur}.helper", f"credential.https://gist.{serveur}.helper"):
+        _, valeurs, _ = git("config", "--global", "--get-all", cle_git, quiet=True)
+        valeurs = valeurs.splitlines()
+        if not any(motif in v for v in valeurs):
+            continue
+        if all(motif in v or not v.strip() for v in valeurs):
+            git("config", "--global", "--unset-all", cle_git, quiet=True)
+        else:
+            git("config", "--global", "--unset-all", cle_git, re.escape(motif), quiet=True)
+
+
+def supprimer_compte(cfg, login=None):
+    """Supprime de cette machine toutes les traces du compte actif : cles de
+    GitHub CLI et de Git Credential Manager, identifiants en clair, identite des
+    commits ecrite par gitmanager, reglages du compte dans gitmanager."""
+    profil, h = PROFIL["nom"], host(cfg)
+    login = login or cfg.get(cle("login"))
     methode = cles_enregistrees(cfg)
+    autre = "entreprise" if profil == "perso" else "perso"
+    partage = host(cfg, autre) == h and cles_enregistrees(cfg, autre) is not None
+    sans_invite = dict(os.environ, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
+    restes = []
+    motif_login = re.compile(rf"(?<![\w-]){re.escape(login)}(?![\w-])", re.I) if login else None
+    gh = chemin_gh()
+    if gh:
+        etat = run([gh, "auth", "status", "-h", h])
+        if (motif_login and motif_login.search(etat.stdout + etat.stderr)) or \
+                (methode == "gh" and not login):
+            if not login or run([gh, "auth", "logout", "-h", h, "-u", login]).returncode != 0:
+                run([gh, "auth", "logout", "-h", h])
+            etat = run([gh, "auth", "status", "-h", h])
+            if motif_login and motif_login.search(etat.stdout + etat.stderr):
+                restes.append("cles de connexion dans GitHub CLI")
+        if "Logged in" not in etat.stdout + etat.stderr:
+            retirer_helper(h, "auth git-credential")
+    if helper_gcm():
+        if login:
+            run(["git", f"credential-{helper_gcm()}", "github", "logout", login], env=sans_invite)
+            run(_cmd_gcm("reject"), f"protocol=https\nhost={h}\nusername={login}\n\n", sans_invite)
+        if methode == "gcm":
+            run(_cmd_gcm("reject"), f"protocol=https\nhost={h}\n\n", sans_invite)
+            if not partage:
+                retirer_helper(h, helper_gcm())
+    if login:
+        run(["git", "credential", "reject"], f"protocol=https\nhost={h}\nusername={login}\n\n",
+            sans_invite)
+        for fichier in {f for f, _ in identifiants_en_clair(h, login)}:
+            a_retirer = {l for f, l in identifiants_en_clair(h, login) if f == fichier}
+            gardees = [l for l in fichier.read_text(encoding="utf-8").splitlines()
+                       if l not in a_retirer]
+            if gardees:
+                fichier.write_text("\n".join(gardees) + "\n", encoding="utf-8")
+            else:
+                fichier.unlink()
+    for cle_git in identite_ecrite(cfg):
+        git("config", "--global", "--unset", cle_git, quiet=True)
+    notes = cfg.get("identite_ecrite") or {}
+    for cle_git in [k for k, v in notes.items() if v.get("profil") == profil]:
+        notes.pop(cle_git)
+    if not notes:
+        cfg.pop("identite_ecrite", None)
+    for k in ("login", "methode", "cles", "enregistrer_connexion", "moyen_connexion"):
+        cfg.pop(cle(k), None)
+    sauver(cfg)
+    restes += traces_compte(cfg)
+    if restes:
+        warn("Ces traces du compte restent sur cette machine :")
+        for t in restes:
+            warn(f"  - {t}")
+    else:
+        ok(f"Compte {login or ''} supprime de cette machine : aucune trace ne reste.".replace("  ", " "))
+    if methode or login:
+        info("Sur GitHub, les autorisations donnees restent visibles ici et revocables :")
+        info(f"https://{h}/settings/applications et https://{h}/settings/tokens")
+    return not restes
+
+
+def act_supprimer_compte(cfg):
+    """Sans connexion en cours : supprime le compte enregistre sur cette machine."""
+    login = cfg.get(cle("login")) or ""
+    traces = traces_compte(cfg)
     print()
-    if not methode:
-        info(f"Aucune cle enregistree sur ce poste pour le compte GitHub {nom_compte()}.")
+    if not traces:
+        info(f"Rien n'est enregistre sur cette machine pour le compte GitHub {nom_compte()}.")
         return
-    effacer_cles(cfg, methode, cfg.get(cle("login")))
-    ok(f"Cles du compte GitHub {nom_compte()} supprimees de ce poste.")
+    info(f"Enregistre sur cette machine pour le compte GitHub {nom_compte()} {login} :")
+    for t in traces:
+        print(f"       - {t}")
+    if ask_yn("Supprimer ce compte de cette machine, sans laisser de trace ?", False):
+        supprimer_compte(cfg, login or None)
 
 
 def changer_serveur(cfg):
@@ -1337,17 +1480,6 @@ def changer_serveur(cfg):
     sauver(cfg)
     SESSION.update(token="", user=None, methode=None)
     connexion_interactive(cfg)
-
-
-def actions_deconnexion(cles):
-    """Choix de deconnexion d'un compte connecte : deux quand des cles sont
-    enregistrees sur ce poste, un seul sinon."""
-    if cles:
-        return [("Se deconnecter et supprimer les cles enregistrees",
-                 lambda cfg: deconnexion(cfg, garder_cles=False)),
-                ("Se deconnecter et garder les cles enregistrees",
-                 lambda cfg: deconnexion(cfg, garder_cles=True))]
-    return [("Se deconnecter", lambda cfg: deconnexion(cfg, garder_cles=False))]
 
 
 def menu_numerote(actions, debut=1, sortie="Retour"):
@@ -1396,21 +1528,6 @@ def changer_compte(cfg):
     else:
         ok(f"Compte GitHub {nom_compte()} : {nouveau}")
     return True
-
-
-def afficher_deconnexion(cles, touches, retrait="    "):
-    """Affiche les choix de deconnexion : deux quand des cles sont enregistrees sur
-    ce poste, un seul sinon. Retourne {touche: garder les cles}."""
-    if cles:
-        libelles = (("Se deconnecter et supprimer les cles enregistrees", False),
-                    ("Se deconnecter et garder les cles enregistrees", True))
-    else:
-        libelles = (("Se deconnecter", False),)
-    choix = {}
-    for touche, (libelle, garder) in zip(touches, libelles):
-        print(f"{retrait}{touche}. {libelle}")
-        choix[touche.lower()] = garder
-    return choix
 
 
 def permission_manquante(code, hdr):
@@ -1560,7 +1677,7 @@ def assurer_identite(cfg, chemin, auto):
         if not valeur:
             valeur = ask("Nom pour les commits" if cle == "user.name"
                          else "Email pour les commits")
-        git("config", "--global", cle, valeur, quiet=True)
+        ecrire_identite(cfg, cle, valeur)
         if not auto:
             ok(f"git {cle} = {valeur}")
 
@@ -2349,7 +2466,7 @@ def act_depots(cfg):
             print(f"    {i:>3}. {nom:<42} {vis:<7} {date:<10}  {loc}")
         print()
         print("      C. Changer de compte")
-        sorties = afficher_deconnexion(cles_enregistrees(cfg), "DG", "      ")
+        print("      D. Se deconnecter")
         print()
         retour = "Entree pour revenir a toute la liste" if filtre else "Entree pour revenir"
         choix = ask(f"Chercher un repo, saisir un numero pour le selectionner ou une lettre, {retour}",
@@ -2364,10 +2481,10 @@ def act_depots(cfg):
             changer_compte(cfg)
             filtre = ""
             pause()
-        elif choix.lower() in sorties:
-            deconnexion(cfg, garder_cles=sorties[choix.lower()])
-            pause()
-            return
+        elif choix.lower() == "d":
+            if deconnexion(cfg):
+                pause()
+                return
         else:
             filtre = choix
 
@@ -2810,19 +2927,19 @@ def act_compte(cfg):
         warn(f"Non connecte a {host(cfg)}.")
     cles = cles_enregistrees(cfg)
     if cles:
-        info(f"Cles de connexion enregistrees sur ce poste, par {NOMS_METHODES[cles]}.")
+        info(f"Compte enregistre sur cette machine, par {NOMS_METHODES[cles]}.")
     print()
     if user:
         actions = [("Changer de moyen de connexion", changer_moyen),
                    ("Changer de compte", changer_compte),
                    ("Changer de serveur GitHub Entreprise", changer_serveur),
                    ("Voir les permissions de la connexion", afficher_permissions)]
-        actions += actions_deconnexion(cles)
+        actions.append(("Se deconnecter", deconnexion))
     else:
         actions = [("Se connecter", connexion_interactive),
                    ("Changer de serveur GitHub Entreprise", changer_serveur)]
-        if cles:
-            actions.append(("Supprimer les cles enregistrees", supprimer_cles))
+        if traces_compte(cfg):
+            actions.append(("Supprimer le compte enregistre sur cette machine", act_supprimer_compte))
     fn = menu_numerote(actions)
     if fn:
         fn(cfg)
@@ -3474,34 +3591,36 @@ def actions_principales(cfg):
     """Choix du menu principal sous les deux options. Se deconnecter apparait
     seulement pour un compte connecte ; sans compte connecte, Se connecter."""
     connectes = [n for n in PROFILS if PROFILS[n]["user"]]
-    avec_cles = [n for n in PROFILS if cles_enregistrees(cfg, n)]
+    enregistres = [n for n in PROFILS if n not in connectes and traces_compte(cfg, n)]
     if not connectes:
         actions = [("Se connecter", pour_un_compte(list(PROFILS), "Se connecter",
                                                     lambda cfg: assurer_connexion(cfg)))]
     else:
         actions = [("Changer de moyen de connexion",
-                    pour_un_compte(connectes, "Changer de moyen de connexion", changer_moyen))]
-        for libelle, fn in actions_deconnexion(any(n in avec_cles for n in connectes)):
-            actions.append((libelle, pour_un_compte(connectes, "Se deconnecter", fn)))
-    hors_connexion = [n for n in avec_cles if n not in connectes]
-    if hors_connexion:
-        actions.append(("Supprimer les cles enregistrees",
-                        pour_un_compte(hors_connexion, "Supprimer les cles enregistrees",
-                                       supprimer_cles)))
-    return actions, connectes, avec_cles
+                    pour_un_compte(connectes, "Changer de moyen de connexion", changer_moyen)),
+                   ("Se deconnecter", pour_un_compte(connectes, "Se deconnecter", deconnexion))]
+    if enregistres:
+        actions.append(("Supprimer le compte enregistre sur cette machine",
+                        pour_un_compte(enregistres, "Supprimer le compte enregistre",
+                                       act_supprimer_compte)))
+    return actions, connectes, enregistres
 
 
 def choisir_fonction(cfg):
     """Menu principal. Retourne le profil de l'option choisie, ou None pour quitter."""
     while True:
         titre("MENU PRINCIPAL")
-        actions, connectes, avec_cles = actions_principales(cfg)
+        actions, connectes, enregistres = actions_principales(cfg)
         for nom in PROFILS:
-            if nom in connectes or nom in avec_cles:
-                etat = PROFILS[nom]["user"].get("login") if nom in connectes else "non connecte"
-                if nom in avec_cles:
-                    etat += ", cles enregistrees sur ce poste"
-                print(c(f"  Compte GitHub {nom_compte(nom)} : {etat}", "90"))
+            if nom in connectes:
+                etat = PROFILS[nom]["user"].get("login")
+                if cles_enregistrees(cfg, nom):
+                    etat += ", enregistre sur cette machine"
+            elif nom in enregistres:
+                etat = "non connecte, compte enregistre sur cette machine"
+            else:
+                continue
+            print(c(f"  Compte GitHub {nom_compte(nom)} : {etat}", "90"))
         print()
         print("    1. Gerer les repos GitHub")
         print("    2. Entreprise : importer un repo, gerer les repos GitHub de l'entreprise")
