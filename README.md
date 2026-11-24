@@ -34,8 +34,12 @@ uv tool uninstall gitmanager
 
 Au lancement, le programme affiche son logo et son accroche. Il installe Git
 s'il manque, dans la dernière version disponible, et affiche son empreinte
-SHA-256 pour la vérifier. Il demande ensuite la connexion au compte GitHub :
-sans connexion, il s'arrête.
+SHA-256 pour la vérifier.
+
+Chaque option demande d'abord la connexion à son compte GitHub : le compte
+perso pour l'option 1, le compte de l'entreprise pour l'option 2. Les deux
+comptes restent séparés. Sans connexion, le programme revient au menu
+principal.
 
 La connexion propose trois moyens, du plus sûr au moins sûr, avec un
 avertissement pour les moyens à risque :
@@ -52,13 +56,12 @@ Une connexion gardée en mémoire s'efface à la fermeture du programme et aprè
 n'a pas, le programme la nomme : une fois ajoutée sur GitHub, elle s'applique
 au nouvel essai, sans reconnexion.
 
-Le menu principal propose ensuite deux options. Dans chaque menu, Entrée
-revient en arrière d'un niveau ; au menu principal, Entrée quitte le
-programme.
+Dans chaque menu, Entrée revient en arrière d'un niveau ; au menu principal,
+Entrée quitte le programme.
 
-### Option 1 : gérer les repos
+### Option 1 : gérer les repos GitHub perso
 
-À utiliser sur l'ordinateur perso.
+Connexion au compte GitHub perso.
 
 1. Gérer les repos GitHub : la liste des repos en ligne.
    - Parcourir les fichiers et voir les commits.
@@ -68,6 +71,7 @@ programme.
    - Cloner le projet en local, quand aucune copie n'existe.
    - Ouvrir dans le navigateur.
    - Supprimer.
+   - Voir les accès à ce repo : le rôle du compte et ses droits.
 2. Gérer les repos locaux : la liste des repos trouvés sur l'ordinateur.
    - Envoyer : commit et push.
    - Mettre à jour : pull.
@@ -80,30 +84,28 @@ programme.
 3. Compte GitHub : changer de moyen de connexion, se déconnecter, changer de
    serveur, voir les permissions de la connexion.
 
-### Option 2 : synchroniser un repo sur l'ordinateur de l'entreprise
+### Option 2 : entreprise
 
-À utiliser sur l'ordinateur pro, connecté au compte GitHub perso. Le
-programme affiche les repos de ce compte :
+Connexion au compte GitHub de l'entreprise.
 
-- Numéro d'un repo : le repo à récupérer.
-- U : saisir l'URL d'un repo GitHub.
-
-Il demande ensuite où trouver le repo de l'entreprise :
-
-1. Le dossier Git est déjà sur ce PC : indiquer son emplacement.
-2. Le cloner depuis le serveur de l'entreprise : indiquer son adresse.
-
-La suite se fait sans chiffre à taper :
-
-- Connexion : compte de l'entreprise, séparé du compte perso.
-- Repo privé : le programme signale les fichiers secrets qu'il contient et
-  demande s'il peut devenir public le temps du clone. Avec la réponse non, il
-  est récupéré avec le compte connecté, sans devenir public.
-- Compte à rebours : après le clone, le repo reste public deux minutes, puis
-  redevient privé ; Entrée le rend privé tout de suite.
-- Rapport : forks, étoiles, vues et clones comptés par GitHub pendant
-  l'ouverture. GitHub peut mettre plusieurs heures à compter les vues.
-- Confirmation : liste des fichiers copiés ou supprimés, puis envoi.
+1. Importer un repo GitHub : saisir son URL. Un repo public s'importe sans
+   connexion.
+   - Repo privé : connexion au compte GitHub perso le temps de l'import.
+   - Ouverture : avec accord, le repo privé devient public le temps du clone,
+     puis redevient privé après deux minutes, ou tout de suite avec Entrée.
+     Le programme signale avant les fichiers secrets qu'il contient.
+   - Rapport : forks, étoiles, vues et clones comptés par GitHub pendant
+     l'ouverture. GitHub peut mettre plusieurs heures à compter les vues.
+   - Envoyer dans un repo GitHub de l'entreprise : numéro d'un repo de la
+     liste, ou U pour saisir son URL.
+   - Mettre à jour : fichiers ajoutés ou remplacés, aucun supprimé.
+   - Écraser : le repo prend exactement le contenu du projet importé,
+     historique gardé.
+   - Copie sur le Bureau : avant l'envoi, le repo de l'entreprise est copié
+     sur le Bureau, sous Windows, macOS ou Linux. La copie reste après
+     l'envoi.
+2. Gérer les repos GitHub de l'entreprise : les mêmes choix que l'option 1,
+   avec le compte de l'entreprise, dont Voir les accès à ce repo.
 
 ## Sécurité
 

@@ -22,26 +22,30 @@ Lancement (avec uv) :
 Commande gitmanager sur n'importe quel poste (avec uv) :
     uv tool install https://github.com/SalehKamil/gitmanager/archive/refs/heads/main.zip
 
-Au lancement : logo, accroche, puis connexion obligatoire au compte GitHub ;
-sans connexion, le programme s'arrete. Menu principal :
+Au lancement : logo et accroche, puis le menu principal. Chaque option
+demande d'abord la connexion a son compte GitHub ; sans connexion, retour au
+menu principal. Les deux comptes restent separes.
 
-  1. Gerer les repos, sur l'ordinateur perso
+  1. Gerer les repos GitHub perso, connexion au compte GitHub perso
      - Gerer les repos GitHub : fichiers, commits, public / prive, ouvrir la
-       copie locale ou cloner le projet en local, supprimer.
+       copie locale ou cloner le projet en local, voir les acces, supprimer.
      - Gerer les repos locaux : envoyer, c'est-a-dire commit + push ; mettre
        a jour par pull ; ecraser par force push ; push ou pull de tous les
        repos d'un dossier ; sans repo local, envoi d'un dossier sur GitHub
        avec nom, description et visibilite.
+     - Compte GitHub : moyen de connexion, serveur, permissions.
 
-  2. Synchroniser un repo sur l'ordinateur de l'entreprise
-     Affiche les repos du compte GitHub connecte, ou une URL saisie. Un repo
-     prive peut devenir public le temps du clone, avec accord : il redevient
-     prive apres un compte a rebours de 2 minutes, ou tout de suite avec
-     Entree, puis un rapport dit s'il a ete vu. Sans accord, il est recupere
-     avec le compte connecte. Le contenu du dossier git du repo de
-     l'entreprise est remplace par ce projet, puis commit + push avec le
-     compte de l'entreprise, seconde authentification distincte du compte
-     perso.
+  2. Entreprise, connexion au compte GitHub de l'entreprise
+     - Importer un repo GitHub par son URL. Un repo public s'importe sans
+       identifiants ; un repo prive demande la connexion au compte perso le
+       temps de l'import, et peut devenir public le temps du clone, avec
+       accord, puis redevenir prive apres 2 minutes. Le projet importe peut
+       ensuite etre envoye dans un repo GitHub de l'entreprise, choisi dans
+       la liste ou par son URL : mettre a jour, sans rien supprimer, ou
+       ecraser, contenu exact. L'envoi passe par une copie locale du repo de
+       l'entreprise sur le Bureau, gardee apres l'envoi.
+     - Gerer les repos GitHub de l'entreprise : les memes choix que
+       l'option 1, avec le compte de l'entreprise.
 
 Connexion : trois moyens, du plus sur au moins sur, avec un avertissement
 pour les moyens a risque. Par code ou par jeton : connexion gardee en memoire
@@ -76,7 +80,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "1.3.0"
+__version__ = "2.0.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -121,8 +125,6 @@ EMPLACEMENTS = ("", "Documents", "Desktop", "Bureau", "Projects", "Projets",
                 "projets", "dev", "code", "src", "repos", "source/repos", "GitHub",
                 "Documents/GitHub", "OneDrive/Documents", "workspace")
 
-# "perso" ou "entreprise" ; jeton du serveur de l'entreprise, en memoire seulement
-MODE = {"nom": "perso", "utilisateur": "", "jeton": ""}
 BRUIT_GIT = re.compile(r"(LF will be replaced by CRLF|CRLF will be replaced by LF)", re.I)
 STATUTS = {"A": "ajoute", "M": "modifie", "D": "supprime", "R": "renomme",
            "C": "copie", "T": "modifie", "U": "conflit"}
@@ -312,8 +314,6 @@ AIDE_JETON = ('!f() { test "$1" = get || exit 0; '
 
 def identite_courante():
     """(utilisateur, jeton) a utiliser pour git, ou None (gestionnaire du PC)."""
-    if MODE["nom"] == "entreprise":
-        return (MODE["utilisateur"], MODE["jeton"]) if MODE["jeton"] else None
     if SESSION["methode"] in EN_MEMOIRE and SESSION["token"]:
         return ("", SESSION["token"])
     return None
@@ -339,10 +339,9 @@ def _env_git(identite=None, anonyme=False):
     for i, (cle, valeur) in enumerate(config, base):
         env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = cle, valeur
     env["GIT_CONFIG_COUNT"] = str(base + len(config))
-    if anonyme or MODE["nom"] == "perso":
-        # Jamais d'invite "Username / Password" : l'acces passe par la
-        # connexion navigateur (gh, Git Credential Manager) ou un jeton.
-        env["GIT_TERMINAL_PROMPT"] = "0"
+    # Jamais d'invite "Username / Password" : l'acces passe par la connexion
+    # navigateur, GitHub CLI ou Git Credential Manager, ou par un jeton.
+    env["GIT_TERMINAL_PROMPT"] = "0"
     if anonyme:
         env["GCM_INTERACTIVE"] = "never"
     return env
@@ -601,7 +600,28 @@ def url_web(url):
 
 # Connexion GitHub par le navigateur (gh ou Git Credential Manager)
 
-SESSION = {"token": "", "user": None, "methode": None}
+# Deux comptes separes : le compte GitHub perso, option 1, et celui de
+# l'entreprise, option 2. SESSION designe toujours le compte actif.
+PROFILS = {"perso": {"token": "", "user": None, "methode": None},
+           "entreprise": {"token": "", "user": None, "methode": None}}
+PROFIL = {"nom": "perso"}
+SESSION = PROFILS["perso"]
+
+
+def activer_profil(nom):
+    global SESSION
+    PROFIL["nom"] = nom
+    SESSION = PROFILS[nom]
+
+
+def cle(nom):
+    """Cle de configuration du compte actif : les reglages de connexion du compte
+    de l'entreprise sont gardes a part de ceux du compte perso."""
+    return nom if PROFIL["nom"] == "perso" else f"{nom}_entreprise"
+
+
+def nom_compte():
+    return "perso" if PROFIL["nom"] == "perso" else "de l'entreprise"
 EN_MEMOIRE = ("jeton", "code")  # connexions jamais enregistrees sur le poste
 NOMS_METHODES = {"gh": "GitHub CLI", "gcm": "Git Credential Manager",
                  "code": "code, en memoire seulement",
@@ -610,7 +630,7 @@ _CACHE_GCM = []
 
 
 def host(cfg):
-    return (cfg.get("host") or "github.com").strip().lower()
+    return (cfg.get(cle("host")) or "github.com").strip().lower()
 
 
 def api_base(cfg):
@@ -884,7 +904,7 @@ def helper_gcm():
 
 
 def methode_dispo(cfg):
-    pref = cfg.get("methode")
+    pref = cfg.get(cle("methode"))
     if pref == "gh" and chemin_gh():
         return "gh"
     if pref == "gcm" and helper_gcm():
@@ -997,7 +1017,7 @@ def configurer_identite(cfg, user):
 
 def demarrer_session(cfg, methode, tok, user):
     SESSION.update(token=tok, user=user, methode=methode)
-    cfg["methode"], cfg["login"] = methode, user.get("login")
+    cfg[cle("methode")], cfg[cle("login")] = methode, user.get("login")
     sauver(cfg)
     configurer_identite(cfg, user)
 
@@ -1058,7 +1078,7 @@ def ouvrir_session_memoire(cfg, methode, tok):
         err(f"Connexion refusee, code {code or 'reseau'} : {message_api(user)}")
         return False
     SESSION.update(token=tok, user=user, methode=methode)
-    cfg["login"] = user.get("login")
+    cfg[cle("login")] = user.get("login")
     sauver(cfg)
     configurer_identite(cfg, user)
     ok(f"Connecte a GitHub : {user.get('login')}, connexion gardee en memoire seulement.")
@@ -1118,7 +1138,7 @@ def connexion_interactive(cfg):
     code_dispo = bool(client_id(cfg))
     while True:
         print()
-        print("  Connexion au compte GitHub, du moyen le plus sur au moins sur :")
+        print(f"  Connexion au compte GitHub {nom_compte()}, du moyen le plus sur au moins sur :")
         print()
         print("    1. Par code, gardee en memoire et valable 8 heures"
               + ("" if code_dispo else " : pas encore disponible"))
@@ -1145,8 +1165,8 @@ def connexion_interactive(cfg):
         else:
             return False
         if connecte:
-            cfg["moyen_connexion"] = choix
-            cfg["enregistrer_connexion"] = choix == "3"
+            cfg[cle("moyen_connexion")] = choix
+            cfg[cle("enregistrer_connexion")] = choix == "3"
             sauver(cfg)
             return True
 
@@ -1194,7 +1214,7 @@ def assurer_connexion(cfg, interactif=True):
     """Reutilise la connexion en cours ou enregistree, sinon en demande une."""
     if SESSION["token"]:
         return True
-    methode = methode_dispo(cfg) if cfg.get("enregistrer_connexion") else None
+    methode = methode_dispo(cfg) if cfg.get(cle("enregistrer_connexion")) else None
     if methode:
         tok = token_silencieux(cfg, methode)
         if tok:
@@ -1217,8 +1237,8 @@ def deconnexion(cfg):
     elif methode == "gcm":
         oublier_gcm(cfg)
     SESSION.update(token="", user=None, methode=None)
-    cfg.pop("login", None)
-    cfg["enregistrer_connexion"] = False
+    cfg.pop(cle("login"), None)
+    cfg[cle("enregistrer_connexion")] = False
     sauver(cfg)
     ok("Deconnecte de GitHub" + (", connexion effacee de ce poste." if methode in ("gh", "gcm") else "."))
 
@@ -1307,16 +1327,14 @@ def erreur_auth(sortie):
 
 def expliquer(sortie):
     s = (sortie or "").lower()
-    perso = MODE["nom"] == "perso"
     if "repository not found" in s:
         return "repo introuvable sur le serveur : supprime, renomme, ou droits manquants"
     if "permission to" in s and "denied" in s:
         return "ce compte n'a pas le droit d'ecrire dans ce repo"
     if erreur_auth(sortie):
-        return ("GitHub refuse l'acces : se reconnecter avec le menu Compte GitHub" if perso else
-                "le serveur refuse l'acces : verifier que 'git push' marche dans ce dossier")
+        return "GitHub refuse l'acces : se reconnecter avec le menu Compte GitHub"
     if "publickey" in s:
-        return "cle SSH refusee" + (" : relancer pour passer le projet en HTTPS" if perso else "")
+        return "cle SSH refusee : relancer pour passer le projet en HTTPS"
     if "could not resolve host" in s or "timed out" in s or "failed to connect" in s:
         return "serveur injoignable : verifier la connexion, le VPN ou le reseau de l'entreprise"
     if "gh001" in s or "file size limit" in s or "large files" in s:
@@ -1461,7 +1479,7 @@ def recuperer(cfg, chemin, remote, auto):
         if code == 0:
             return
         url = url_remote(remote, chemin)
-        if tentative == 1 and not auto and MODE["nom"] == "perso":
+        if tentative == 1 and not auto:
             if est_ssh(url) and ("publickey" in e or "Permission denied" in e
                                  or "Host key" in e):
                 warn("Connexion SSH refusee : aucune cle SSH configuree pour GitHub.")
@@ -1584,11 +1602,11 @@ def pousser(cfg, chemin, remote, branche, auto=False):
         if code == 0:
             break
         refus = "permission to" in e.lower() and "denied" in e.lower()
-        if tentative < 3 and not auto and MODE["nom"] == "perso" and refus \
+        if tentative < 3 and not auto and refus \
                 and SESSION["methode"] in EN_MEMOIRE + ("gh",):
             if mettre_a_jour_permissions(cfg, "contents=write, ecriture dans ce repo"):
                 continue
-        if tentative == 1 and not auto and MODE["nom"] == "perso" and erreur_auth(e) and not refus:
+        if tentative == 1 and not auto and erreur_auth(e) and not refus:
             SESSION["token"] = ""
             if connexion_interactive(cfg):
                 continue
@@ -1610,15 +1628,7 @@ def pousser(cfg, chemin, remote, branche, auto=False):
 
 
 def relier(cfg, chemin):
-    if MODE["nom"] == "perso":
-        return lier_a_github(cfg, chemin)
-    warn("Ce repo n'a pas d'adresse de serveur, ou remote.")
-    url = ask("URL du repo de l'entreprise, https://... ou git@..., vide pour annuler",
-              "", obligatoire=False)
-    if not url:
-        return None
-    git("remote", "add", "origin", verifier_url(url), cwd=chemin)
-    return "origin"
+    return lier_a_github(cfg, chemin)
 
 
 def preparer(cfg, chemin, auto, lier=True):
@@ -2219,6 +2229,7 @@ def menu_depot(cfg, d, locaux):
         print("    4. " + ("Ouvrir la copie" if local else "Cloner le projet en local"))
         print("    5. Ouvrir dans le navigateur")
         print("    6. Supprimer de GitHub")
+        print("    7. Voir les acces a ce repo")
         print("    0. Retour a la liste")
         choix = ask("Choix", "0")
         if choix == "1":
@@ -2238,6 +2249,9 @@ def menu_depot(cfg, d, locaux):
                 menu_projet(cfg, local)
         elif choix == "5":
             webbrowser.open(d["html_url"])
+        elif choix == "7":
+            afficher_acces(cfg, d)
+            pause()
         elif choix == "6":
             if supprimer_depot(cfg, d):
                 pause()
@@ -2496,7 +2510,7 @@ def act_compte(cfg):
         deconnexion(cfg)
     elif choix == "3":
         nouveau = ask("Serveur, par exemple github.com ou github.monentreprise.com", host(cfg))
-        cfg["host"] = re.sub(r"^https?://", "", nouveau).strip("/").lower()
+        cfg[cle("host")] = re.sub(r"^https?://", "", nouveau).strip("/").lower()
         sauver(cfg)
         SESSION.update(token="", user=None, methode=None)
         connexion_interactive(cfg)
@@ -2522,109 +2536,6 @@ def url_source(saisie):
     if re.fullmatch(r"[\w.-]+/[\w.-]+", s):
         return f"https://github.com/{s.removesuffix('.git')}.git"
     return verifier_url(s)
-
-
-def acces_ok(cible, cwd=None, interactif=False):
-    """Le serveur accepte-t-il ces identifiants ? (git ls-remote, rien n'est modifie)"""
-    env = _env_git()
-    if not interactif:
-        env["GIT_TERMINAL_PROMPT"], env["GCM_INTERACTIVE"] = "0", "never"
-    code, _, e = git("ls-remote", "--heads", cible, cwd=cwd, quiet=True, env=env)
-    return code == 0, e
-
-
-def assurer_acces_entreprise(cible, cwd=None):
-    """Seconde authentification : compte du serveur de l'entreprise, distinct du
-    compte perso. Les identifiants deja presents sur ce PC sont essayes d'abord."""
-    acces, e = acces_ok(cible, cwd)
-    if acces:
-        ok("Acces au repo de l'entreprise verifie.")
-        return
-    url = url_remote(cible, cwd) if cwd else cible
-    if not (erreur_auth(e) or "not found" in e.lower()):
-        raise Arret("erreur", expliquer(e))
-    if est_ssh(url):
-        raise Arret("erreur", "cle SSH refusee : ajouter la cle publique au compte de l'entreprise")
-    serveur = infos_url(url)[0] or "serveur"
-    methodes = ([("gcm", "Navigateur, avec Git Credential Manager")] if helper_gcm() else []) \
-        + ([("gh", "Navigateur, avec GitHub CLI")] if chemin_gh() else []) \
-        + [("jeton", "Jeton d'acces ou mot de passe")]
-    while True:
-        print()
-        warn(f"Connexion au serveur de l'entreprise {serveur} : seconde authentification,")
-        info("distincte du compte perso.")
-        for i, (_, libelle) in enumerate(methodes, 1):
-            print(f"    {i}. {libelle}")
-        print("    0. Annuler")
-        choix = ask("Choix", "0")
-        if not (choix.isdigit() and 1 <= int(choix) <= len(methodes)):
-            raise Arret("ignore", "annule : rien n'a ete modifie")
-        methode = methodes[int(choix) - 1][0]
-        if methode == "gcm":
-            configurer_helper_gcm(serveur)
-            acces, e = acces_ok(cible, cwd, interactif=True)
-        elif methode == "gh":
-            subprocess.run([chemin_gh(), "auth", "login", "--web", "-h", serveur, "-p", "https"])
-            run([chemin_gh(), "auth", "setup-git", "-h", serveur])
-            acces, e = acces_ok(cible, cwd)
-        else:
-            MODE["utilisateur"], MODE["jeton"] = demander_secret(serveur, avec_utilisateur=True)
-            acces, e = acces_ok(cible, cwd)
-            if not acces:
-                MODE.update(utilisateur="", jeton="")
-        if acces:
-            ok("Connecte au serveur de l'entreprise.")
-            return
-        err("Acces refuse : " + expliquer(e))
-
-
-def cloner_depot_entreprise(cfg):
-    url = verifier_url(ask("URL du repo de l'entreprise, https://... ou git@...",
-                           cfg.get("url_entreprise", "")))
-    cfg["url_entreprise"] = url
-    sauver(cfg)
-    assurer_acces_entreprise(url)
-    parent = nettoyer_chemin(ask("Cloner dans le dossier",
-                                 cfg.get("espace_entreprise") or str(Path.home())))
-    nom = infos_url(url)[2] or os.path.basename(url.rstrip("/\\")).removesuffix(".git")
-    dest = os.path.join(parent, nom)
-    if os.path.exists(os.path.join(dest, ".git")):
-        actuel = url_remote(remote_principal(dest) or "origin", dest)
-        if (cle_depot(actuel) or actuel) == (cle_depot(url) or url):
-            info(f"Deja clone dans {dest} : ce dossier est reutilise.")
-            return dest
-        raise Arret("erreur", f"{dest} contient deja un autre repo git")
-    if os.path.exists(dest) and (not os.path.isdir(dest) or os.listdir(dest)):
-        raise Arret("erreur", f"{dest} existe deja et n'est pas vide")
-    os.makedirs(parent, exist_ok=True)
-    if git_direct("clone", url, dest) != 0:
-        raise Arret("erreur", "clone impossible : verifier l'adresse et les droits")
-    cfg["espace_entreprise"] = parent
-    sauver(cfg)
-    ok(f"Repo de l'entreprise clone dans {dest}")
-    return dest
-
-
-def choisir_destination(cfg):
-    """Dossier git du repo de l'entreprise : deja present, ou clone maintenant."""
-    defaut = cfg.get("destination", "")
-    print()
-    print("    1. Le dossier git du repo de l'entreprise est deja sur ce PC")
-    print("    2. Le cloner depuis le serveur de l'entreprise")
-    print("    0. Retour")
-    choix = ask("Choix", "0")
-    if choix == "1":
-        dest = nettoyer_chemin(ask("Emplacement du dossier git de l'entreprise", defaut))
-    elif choix == "2":
-        dest = cloner_depot_entreprise(cfg)
-    else:
-        raise Arret("ignore", "annule")
-    racine = racine_repo(dest) if os.path.isdir(dest) else None
-    if racine is None:
-        raise Arret("erreur", f"aucun repo git dans {dest} : choisir 2 pour le cloner")
-    cfg["destination"] = dest
-    sauver(cfg)
-    return dest, racine
 
 
 def recuperer_source(cfg, url, dossier):
@@ -2746,19 +2657,24 @@ def supprimer_avec_dossiers_vides(fichier, limite):
         d = os.path.dirname(d)
 
 
-def remplacer_contenu(source, dest):
-    """Rend le dossier de l'entreprise identique au projet recupere (hors .git).
-    Retourne False si l'utilisateur annule."""
+def remplacer_contenu(source, dest, supprimer=True):
+    """Copie le projet importe dans le repo de l'entreprise, hors .git. Avec
+    supprimer, le repo devient identique au projet : ecraser ; sans, rien n'est
+    supprime : mettre a jour. Retourne False si l'utilisateur annule."""
     plan = plan_copie(source, dest)
-    a_copier, a_supprimer = plan["nouveaux"] + plan["modifies"], plan["en_trop"]
+    a_copier = plan["nouveaux"] + plan["modifies"]
+    a_supprimer = plan["en_trop"] if supprimer else []
     print()
     info("Comparaison avec le repo de l'entreprise :")
     print(f"       {plan['identiques']:>5} identique(s)")
     print(f"       {len(plan['modifies']):>5} modifie(s)")
     print(f"       {len(plan['nouveaux']):>5} nouveau(x)")
-    print(f"       {len(a_supprimer):>5} a supprimer, absents du projet recupere")
+    if supprimer:
+        print(f"       {len(a_supprimer):>5} a supprimer, absents du projet importe")
+    elif plan["en_trop"]:
+        print(f"       {len(plan['en_trop']):>5} garde(s), absents du projet importe")
     if not a_copier and not a_supprimer:
-        info("Le repo de l'entreprise contient deja exactement ce projet.")
+        info("Le repo de l'entreprise contient deja ce projet.")
         return True
     print()
     for libelle, liste in (("modifie ", plan["modifies"]), ("nouveau ", plan["nouveaux"]),
@@ -2768,7 +2684,7 @@ def remplacer_contenu(source, dest):
         if len(liste) > 20:
             print(f"       ... et {len(liste) - 20} autre(s)")
     print()
-    if not ask_yn(f"Remplacer le contenu du repo de l'entreprise : {len(a_copier)} "
+    if not ask_yn(f"Appliquer au repo de l'entreprise : {len(a_copier)} "
                   f"copie(s), {len(a_supprimer)} suppression(s) ?", True):
         return False
     echecs = []
@@ -2816,39 +2732,6 @@ def mettre_a_jour_destination(cfg, racine, remote, branche):
 
 
 DUREE_PUBLIC = 120  # secondes pendant lesquelles le repo reste public apres le clone
-
-
-def choisir_repo_source(cfg):
-    """Repos du compte GitHub connecte, ou URL saisie. Retourne (url, repo ou None)."""
-    info("Chargement des repos du compte GitHub...")
-    repos = api_liste(cfg, "/user/repos?per_page=100&sort=pushed&affiliation=owner") or []
-    print()
-    if repos:
-        print(c(f"    {'#':>3}  {'Repo':<44} Visibilite", "90"))
-        for i, d in enumerate(repos, 1):
-            print(f"    {i:>3}. {d['full_name'][:44]:<44} {'prive' if d.get('private') else 'public'}")
-    else:
-        info("Aucun repo sur ce compte.")
-    print()
-    print("      U. Saisir l'URL d'un repo GitHub")
-    choix = ask("Numero d'un repo ou U, Entree pour revenir", "", obligatoire=False).lower()
-    if choix.isdigit() and 1 <= int(choix) <= len(repos):
-        d = repos[int(choix) - 1]
-        return d["clone_url"], d
-    if choix == "u":
-        saisie = ask("URL du repo, ou proprietaire/nom", cfg.get("source_depot", ""))
-        cfg["source_depot"] = saisie
-        sauver(cfg)
-        url = url_source(saisie)
-        h, o, r = infos_url(url)
-        if o and h == host(cfg):
-            code, rep, _ = requete(cfg, "GET", f"/repos/{o}/{r}")
-            if code == 200 and isinstance(rep, dict):
-                return url, rep
-        return url, None
-    if choix:
-        warn("Choix invalide.")
-    raise Arret("ignore", "annule")
 
 
 def compteurs(cfg, full):
@@ -2977,31 +2860,175 @@ def recuperer_avec_ouverture(cfg, d, dossier):
     return source
 
 
-def act_synchroniser(cfg):
-    titre("Synchroniser un repo sur l'ordinateur de l'entreprise")
-    info("Le repo GitHub est recupere, puis envoye dans le repo de")
-    info("l'entreprise avec le compte de l'entreprise.")
-    url, d = choisir_repo_source(cfg)
-    dest, racine = choisir_destination(cfg)
-    branche, remote = preparer(cfg, racine, auto=False)
-    assurer_acces_entreprise(remote, cwd=racine)
-    adresse = url_remote(remote, racine)
-    info(f"Repo de l'entreprise : {url_web(adresse) or adresse}   branche {branche}")
-    mettre_a_jour_destination(cfg, racine, remote, branche)
+# Option 2 : importer un repo GitHub, l'envoyer dans un repo de l'entreprise
+
+def dossier_bureau():
+    """Bureau de l'utilisateur, selon le systeme ; le dossier perso a defaut."""
+    maison = Path.home()
+    if sys.platform.startswith("linux") and shutil.which("xdg-user-dir"):
+        code, out = _sortie(["xdg-user-dir", "DESKTOP"])
+        out = out.strip()
+        if code == 0 and out and os.path.isdir(out) and os.path.normpath(out) != str(maison):
+            return out
+    for d in (maison / "Desktop", maison / "OneDrive" / "Desktop", maison / "OneDrive" / "Bureau",
+              maison / "Bureau"):
+        if d.is_dir():
+            return str(d)
+    return str(maison)
+
+
+def copie_sur_bureau(url, nom):
+    """Copie locale du repo de l'entreprise sur le Bureau : reutilisee si elle
+    existe deja, sinon clonee. Retourne son dossier."""
+    bureau = dossier_bureau()
+    dest = os.path.join(bureau, nom)
+    n = 2
+    while os.path.exists(dest):
+        if os.path.isdir(os.path.join(dest, ".git")) and \
+                (cle_depot(adresse_principale(dest)) or adresse_principale(dest)) == (cle_depot(url) or url):
+            info(f"Copie locale deja sur le Bureau : {dest}")
+            return dest
+        dest = os.path.join(bureau, f"{nom}-{n}")
+        n += 1
+    info(f"Copie locale du repo de l'entreprise sur le Bureau : {dest}")
+    if git_direct("clone", url, dest) != 0:
+        raise Arret("erreur", "clone du repo de l'entreprise impossible : verifier l'adresse et les droits")
+    return dest
+
+
+def import_prive(cfg, url, dossier):
+    """Repo prive : connexion au compte GitHub perso le temps de l'import, puis
+    oubli de cette connexion si elle etait gardee en memoire."""
+    deja = bool(PROFILS["perso"]["token"])
+    activer_profil("perso")
+    try:
+        if not connexion_obligatoire(cfg):
+            raise Arret("ignore", "import annule")
+        _, o, r = infos_url(url)
+        code, d, _ = requete(cfg, "GET", f"/repos/{o}/{r}")
+        if code == 200 and isinstance(d, dict) and d.get("private") \
+                and (d.get("permissions") or {}).get("admin"):
+            return recuperer_avec_ouverture(cfg, d, dossier)
+        return recuperer_source(cfg, url, dossier)[0]
+    finally:
+        if not deja and SESSION["methode"] in EN_MEMOIRE:
+            SESSION.update(token="", user=None, methode=None)
+        activer_profil("entreprise")
+
+
+def importer_repo(cfg, dossier):
+    """Import d'un repo GitHub par son URL, sans identifiants s'il est public.
+    Retourne (dossier du projet importe, nom du repo)."""
+    saisie = ask("URL du repo GitHub a importer, ou proprietaire/nom, Entree pour revenir",
+                 obligatoire=False)
+    if not saisie:
+        return None, None
+    url = url_source(saisie)
+    nom = cle_depot(url) or os.path.basename(url.rstrip("/\\")).removesuffix(".git")
+    cible = os.path.join(dossier, "projet")
+    info(f"Import de {url_web(url) or url}...")
+    code, _, e = git("clone", "--depth", "1", "--no-tags", "--quiet", url, cible,
+                     quiet=True, env=_env_git(anonyme=True))
+    if code != 0:
+        if est_ssh(url) or not (erreur_auth(e) or "not found" in e.lower()):
+            raise Arret("erreur", "import impossible : " + expliquer(e))
+        warn("Ce repo n'est pas accessible sans identifiants : il est prive, ou son nom est faux.")
+        if not ask_yn("Se connecter au compte GitHub perso pour cet import ?", True):
+            raise Arret("ignore", "import annule")
+        if os.path.exists(cible):
+            supprimer_dossier(cible)
+        cible = import_prive(cfg, url, dossier)
+    _, dernier, _ = git("log", "-1", "--format=%h  %s", cwd=cible, quiet=True)
+    ok(f"Importe : {nom}, dernier commit {dernier}")
+    return cible, nom
+
+
+def envoyer_vers_entreprise(cfg, source):
+    """Envoi du projet importe dans un repo GitHub de l'entreprise, a partir d'une
+    copie locale creee sur le Bureau. Retourne "retour" quand Entree ramene au
+    menu precedent."""
+    titre("Envoyer dans un repo GitHub de l'entreprise")
+    info("Chargement des repos du compte GitHub de l'entreprise...")
+    repos = api_liste(cfg, "/user/repos?per_page=100&sort=pushed"
+                           "&affiliation=owner,collaborator,organization_member") or []
+    print()
+    if repos:
+        print(c(f"    {'#':>3}  {'Repo':<44} Droits", "90"))
+        for i, d in enumerate(repos, 1):
+            droits = "ecriture" if (d.get("permissions") or {}).get("push") else "lecture"
+            print(f"    {i:>3}. {d['full_name'][:44]:<44} {droits}")
+    else:
+        info("Aucun repo sur ce compte.")
+    print()
+    print("      U. Saisir l'URL du repo de l'entreprise")
+    choix = ask("Numero d'un repo ou U, Entree pour revenir", "", obligatoire=False).lower()
+    if choix.isdigit() and 1 <= int(choix) <= len(repos):
+        url, nom = repos[int(choix) - 1]["clone_url"], repos[int(choix) - 1]["name"]
+    elif choix == "u":
+        saisie = ask("URL du repo de l'entreprise, https://... ou git@..., Entree pour revenir",
+                     obligatoire=False)
+        if not saisie:
+            return "retour"
+        url = verifier_url(saisie)
+        nom = infos_url(url)[2] or os.path.basename(url.rstrip("/\\")).removesuffix(".git")
+    else:
+        if choix:
+            warn("Choix invalide.")
+            return "ignore", "annule"
+        return "retour"
+    print()
+    print("    1. Mettre a jour le repo : fichiers ajoutes ou remplaces, aucun supprime")
+    print("    2. Ecraser le repo : il prend exactement le contenu du projet importe")
+    print("    0. Retour")
+    mode = ask("Choix", "0")
+    if mode not in ("1", "2"):
+        return "retour"
+    copie = copie_sur_bureau(url, nom)
+    branche, remote = preparer(cfg, copie, auto=False)
+    mettre_a_jour_destination(cfg, copie, remote, branche)
+    if not remplacer_contenu(source, copie, supprimer=mode == "2"):
+        return "ignore", "annule : le repo de l'entreprise n'a pas ete modifie"
+    print()
+    committer(cfg, copie, proposer_gitignore=False)
+    statut, detail = pousser(cfg, copie, remote, branche)
+    info(f"Copie locale gardee sur le Bureau : {copie}")
+    return statut, detail
+
+
+def act_importer(cfg):
+    titre("Importer un repo GitHub")
     temp = tempfile.mkdtemp(prefix="gitmanager-")
     try:
-        if d and d.get("private") and (d.get("permissions") or {}).get("admin"):
-            source = recuperer_avec_ouverture(cfg, d, temp)
-        else:
-            source = recuperer_source(cfg, url, temp)[0]
-        if not remplacer_contenu(source, dest):
-            return "ignore", "annule : le repo de l'entreprise n'a pas ete modifie"
-        print()
-        committer(cfg, racine, proposer_gitignore=False)
-        return pousser(cfg, racine, remote, branche)
+        source, nom = importer_repo(cfg, temp)
+        if not source:
+            return None
+        while True:
+            titre(f"Projet importe : {nom}")
+            print("    1. Envoyer dans un repo GitHub de l'entreprise")
+            print("    0. Retour")
+            if ask("Choix", "0") != "1":
+                return None
+            if executer(envoyer_vers_entreprise, cfg, source) != "retour":
+                pause()
     finally:
-        supprimer_dossier(temp)  # aucune copie du projet ne reste sur le disque
-        MODE.update(utilisateur="", jeton="")
+        supprimer_dossier(temp)  # aucune copie du projet importe ne reste hors du Bureau
+
+
+def afficher_acces(cfg, d):
+    """Acces du compte connecte a ce repo, relus sur GitHub."""
+    niveaux = (("admin", "administration"), ("maintain", "maintenance"), ("push", "ecriture"),
+               ("triage", "tri des issues"), ("pull", "lecture"))
+    droits = d.get("permissions") or {}
+    role = next((libelle for k, libelle in niveaux if droits.get(k)), "aucun")
+    login = (SESSION["user"] or {}).get("login")
+    if login:
+        code, rep, _ = requete(cfg, "GET", f"/repos/{d['full_name']}/collaborators/{login}/permission")
+        if code == 200 and isinstance(rep, dict) and rep.get("role_name"):
+            role = rep["role_name"]
+    print()
+    info(f"Acces de {login or 'ce compte'} a {d['full_name']} : role {role}")
+    for k, libelle in niveaux:
+        print(f"       {libelle:<16} {'oui' if droits.get(k) else 'non'}")
 
 
 # Menus
@@ -3101,28 +3128,26 @@ def lancer(fn, cfg, avec_pause=True):
 
 
 def ligne_compte(cfg):
-    print(c(f"  Compte GitHub : {SESSION['user'].get('login')}, "
+    print(c(f"  Compte GitHub {nom_compte()} : {SESSION['user'].get('login')}, "
             f"{NOMS_METHODES[SESSION['methode']]}, {host(cfg)}", "90"))
 
 
 def choisir_fonction(cfg):
     titre("MENU PRINCIPAL")
-    ligne_compte(cfg)
+    for nom, libelle in (("perso", "perso"), ("entreprise", "de l'entreprise")):
+        user = PROFILS[nom]["user"]
+        if user:
+            print(c(f"  Compte GitHub {libelle} : {user.get('login')}", "90"))
     print()
-    print("    1. Gerer les repos")
-    print("    2. Synchroniser un repo sur l'ordinateur de l'entreprise")
+    print("    1. Gerer les repos GitHub perso")
+    print("    2. Entreprise : importer un repo, gerer les repos GitHub de l'entreprise")
     print("    0. Quitter")
-    choix = ask("Choix", "0")
-    if choix not in ("1", "2"):
-        return None
-    cfg["mode"] = "entreprise" if choix == "2" else "perso"
-    sauver(cfg)
-    return cfg["mode"]
+    return {"1": "perso", "2": "entreprise"}.get(ask("Choix", "0"))
 
 
 def connexion_obligatoire(cfg):
-    """La connexion au compte GitHub passe toujours en premier : sans elle,
-    le programme n'affiche rien d'autre."""
+    """La connexion au compte GitHub de l'option passe toujours en premier :
+    sans elle, l'option ne s'ouvre pas."""
     while not SESSION["user"]:
         try:
             return assurer_connexion(cfg)
@@ -3132,9 +3157,10 @@ def connexion_obligatoire(cfg):
     return True
 
 
-def menu_perso(cfg):
+def menu_repos(cfg, nom_menu):
+    """Repos GitHub, repos locaux et compte, pour le compte actif."""
     while connexion_obligatoire(cfg):
-        titre("OPTION 1 : GERER LES REPOS")
+        titre(nom_menu)
         ligne_compte(cfg)
         print()
         print("    1. Gerer les repos GitHub")
@@ -3151,6 +3177,29 @@ def menu_perso(cfg):
             warn("Choix invalide.")
 
 
+def menu_perso(cfg):
+    menu_repos(cfg, "OPTION 1 : REPOS GITHUB PERSO")
+
+
+def menu_entreprise(cfg):
+    while connexion_obligatoire(cfg):
+        titre("OPTION 2 : ENTREPRISE")
+        ligne_compte(cfg)
+        print()
+        print("    1. Importer un repo GitHub")
+        print("    2. Gerer les repos GitHub de l'entreprise")
+        print("    0. Retour")
+        choix = ask("Choix", "0")
+        if choix in ("0", "q", "quit", "exit"):
+            return
+        if choix == "1":
+            lancer(act_importer, cfg, avec_pause=False)
+        elif choix == "2":
+            menu_repos(cfg, "OPTION 2 : REPOS GITHUB DE L'ENTREPRISE")
+        else:
+            warn("Choix invalide.")
+
+
 def main():
     if sys.version_info < (3, 9):
         print("gitmanager demande Python 3.9 ou plus : le lancer avec "
@@ -3162,21 +3211,21 @@ def main():
     if not preparer_outils(cfg):
         sys.exit(1)
     try:
-        if not connexion_obligatoire(cfg):
-            print("\n  Pas de connexion a GitHub : fin du programme.\n")
-            return
-        while connexion_obligatoire(cfg):
-            mode = choisir_fonction(cfg)
-            if not mode:
+        while True:
+            option = choisir_fonction(cfg)
+            if not option:
                 break
-            MODE["nom"] = mode
-            if mode == "perso":
+            activer_profil(option)
+            if not connexion_obligatoire(cfg):
+                info("Pas de connexion : retour au menu principal.")
+                continue
+            if option == "perso":
                 menu_perso(cfg)
             else:
-                lancer(act_synchroniser, cfg)
+                menu_entreprise(cfg)
     finally:
-        SESSION.update(token="", user=None, methode=None)  # oubli des jetons
-        MODE.update(utilisateur="", jeton="")
+        for session in PROFILS.values():  # oubli des jetons des deux comptes
+            session.update(token="", user=None, methode=None)
     print("\n  A bientot.\n")
 
 
