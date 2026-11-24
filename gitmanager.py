@@ -98,7 +98,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.9.2"
+__version__ = "2.9.3"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -531,6 +531,42 @@ def derniere_ligne(texte):
 def racine_repo(chemin):
     code, out, _ = git("rev-parse", "--show-toplevel", cwd=chemin, quiet=True)
     return os.path.normpath(out) if code == 0 and out else None
+
+
+def acces_repo(chemin):
+    """Racine du repo git du dossier. Quand un .git existe mais que Git refuse de
+    le lire, le programme dit pourquoi et propose la solution. Retourne
+    (racine ou None, True si un .git existe)."""
+    for essai in (1, 2):
+        code, out, e = git("rev-parse", "--show-toplevel", cwd=chemin, quiet=True)
+        if code == 0 and out:
+            return os.path.normpath(out), True
+        if "dubious ownership" not in e.lower() or essai == 2:
+            break
+        # Git bloque un repo dont le dossier appartient a un autre compte du poste
+        m = re.search(r"safe\.directory\s+'?([^'\n]+?)'?\s*$", e, re.M)
+        cible = m.group(1) if m else chemin
+        print()
+        warn("Git bloque ce repo : son dossier appartient a un autre compte de cette machine.")
+        info("Git protege ainsi les dossiers des autres comptes, par exemple apres une copie")
+        info("depuis un autre Mac ou un clone fait avec sudo.")
+        if not ask_yn("Faire confiance au dossier ? Git le note dans safe.directory.", True):
+            return None, True
+        git("config", "--global", "--add", "safe.directory", cible, quiet=True)
+    existe = os.path.lexists(os.path.join(chemin, ".git"))
+    if existe:
+        s = e.lower()
+        print()
+        err(f"Git ne peut pas lire le dossier .git de {chemin}.")
+        if "operation not permitted" in s or "permission denied" in s:
+            info("Le systeme bloque ce dossier pour ce terminal : sur macOS, l'autoriser dans")
+            info("Reglages Systeme, Confidentialite et securite, Fichiers et dossiers.")
+        elif "dubious ownership" in s:
+            info("Git bloque encore ce dossier : voir son proprietaire.")
+        else:
+            info("Le dossier .git est sans doute incomplet, par exemple avec iCloud ou OneDrive :")
+            info("cloner de nouveau le repo depuis Repos GitHub en ligne.")
+    return None, existe
 
 
 def branche_courante(chemin):
@@ -2590,7 +2626,8 @@ def menu_init(cfg, chemin):
 
 def menu_projet(cfg, chemin):
     chemin = os.path.normpath(chemin)
-    if racine_repo(chemin) is None and not menu_init(cfg, chemin):
+    racine, existe = acces_repo(chemin)
+    if racine is None and (existe or not menu_init(cfg, chemin)):
         return
     nettoyer_depot(chemin)
     remote = remote_principal(chemin)
