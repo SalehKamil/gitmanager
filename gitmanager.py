@@ -72,7 +72,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -1121,7 +1121,7 @@ def connexion_interactive(cfg):
         print("    2. Par jeton d'acces, garde en memoire")
         print("    3. Par le navigateur, enregistree sur ce poste")
         print("    0. Annuler")
-        choix = ask("Choix", cfg.get("moyen_connexion") or ("1" if code_dispo else "2"))
+        choix = ask("Choix", "0")
         if choix == "1":
             if not code_dispo:
                 warn("La connexion par code demande l'application GitHub de gitmanager,")
@@ -1488,7 +1488,11 @@ def integrer(cfg, chemin, remote, branche, auto, pour_envoi=False):
         warn(f"Sur le serveur la branche principale est '{defaut}', ici c'est '{branche}'.")
         print(f"    1. Renommer '{branche}' en '{defaut}' et continuer")
         print(f"    2. Garder '{branche}' comme branche separee sur le serveur")
-        if ask("Choix", "1") == "2":
+        print("    0. Annuler")
+        choix = ask("Choix", "0")
+        if choix not in ("1", "2"):
+            raise Arret("ignore", "envoi annule")
+        if choix == "2":
             return branche, 0
         if defaut in branches_locales(chemin):
             raise Arret("erreur", f"une branche locale '{defaut}' existe deja : "
@@ -1517,8 +1521,8 @@ def integrer(cfg, chemin, remote, branche, auto, pour_envoi=False):
         print("    2. Ce dossier fait foi : le serveur prend exactement son contenu")
         print("       les fichiers absents d'ici y seront supprimes, l'historique est garde")
         print("    0. Annuler")
-        choix = ask("Choix", "1")
-        if choix == "0":
+        choix = ask("Choix", "0")
+        if choix not in ("1", "2"):
             raise Arret("ignore", "envoi annule")
         if choix == "2":
             code, _, e = git("merge", "-s", "ours", "--allow-unrelated-histories", "-m",
@@ -1746,7 +1750,7 @@ def lier_a_github(cfg, chemin):
     print("    1. Creer un nouveau repo sur GitHub")
     print("    2. Le relier a un repo GitHub existant")
     print("    0. Annuler")
-    choix = ask("Choix", "1")
+    choix = ask("Choix", "0")
     if choix not in ("1", "2") or not assurer_connexion(cfg):
         return None
     login = SESSION["user"]["login"]
@@ -1944,7 +1948,7 @@ def menu_init(cfg, chemin):
     print("    1. git init, creation du repo GitHub, premier commit et push")
     print("    2. git init seulement")
     print("    0. Retour")
-    choix = ask("Choix", "1")
+    choix = ask("Choix", "0")
     if choix not in ("1", "2"):
         return False
     init_depot(chemin)
@@ -2106,7 +2110,7 @@ def act_tout(cfg):
     print("    1. Tout envoyer : commit + push de chaque repo")
     print("    2. Tout mettre a jour : pull de chaque repo")
     print("    0. Annuler")
-    mode = ask("Choix", "1")
+    mode = ask("Choix", "0")
     if mode not in ("1", "2"):
         return
     message = ask("Message de commit pour les projets modifies", message_defaut()) \
@@ -2261,17 +2265,17 @@ def parcourir_depot(cfg, d):
         print()
         print(c(f"  {full} : /{chemin}    branche {ref}", "1;36"))
         if chemin:
-            print("      0. ..  dossier parent")
+            print("      0. ..  dossier parent, ou Entree")
         for i, e in enumerate(entrees, 1):
             if e.get("type") == "dir":
                 print(f"    {i:>3}. {e['name']}/")
             else:
                 print(f"    {i:>3}. {e['name']:<48} {taille(e.get('size')):>9}")
-        choix = ask("Numero d'un dossier ou d'un fichier, 0 pour remonter, Entree pour revenir", "",
+        choix = ask("Numero d'un dossier ou d'un fichier, Entree pour revenir", "",
                     obligatoire=False)
-        if not choix:
+        if not choix and not chemin:
             return
-        if choix in ("0", "..") and chemin:
+        if choix in ("", "0", "..") and chemin:
             chemin = chemin.rsplit("/", 1)[0] if "/" in chemin else ""
         elif choix.isdigit() and 1 <= int(choix) <= len(entrees):
             e = entrees[int(choix) - 1]
@@ -2311,7 +2315,7 @@ def afficher_fichier(cfg, full, chemin, ref, d):
             print(c(f"  {i:>4} ", "90") + l)
         if len(lignes) > 80:
             info(f"... {len(lignes) - 80} ligne(s) de plus : o pour tout voir sur GitHub")
-    if ask("o = ouvrir sur GitHub, Entree = retour", "", obligatoire=False).lower() == "o":
+    if ask("o pour ouvrir sur GitHub, Entree pour revenir", "", obligatoire=False).lower() == "o":
         webbrowser.open(rep.get("html_url") or d["html_url"])
 
 
@@ -2334,7 +2338,7 @@ def voir_commits(cfg, d):
             auteur = (cm.get("author") or {}).get("login") or infos.get("name") or "?"
             msg = cm["commit"]["message"].splitlines()[0][:48]
             print(f"    {i:>3}. {cm['sha'][:7]}  {infos['date'][:10]}  {auteur[:14]:<14} {msg}")
-        choix = ask("Numero d'un commit pour voir les fichiers changes, Entree = retour",
+        choix = ask("Numero d'un commit pour voir les fichiers changes, Entree pour revenir",
                     "", obligatoire=False)
         if not choix:
             return
@@ -2478,7 +2482,7 @@ def act_compte(cfg):
     print("    3. Changer de serveur GitHub Entreprise")
     print("    4. Voir les permissions de la connexion")
     print("    0. Retour")
-    choix = ask("Choix", "0" if user else "1")
+    choix = ask("Choix", "0")
     if choix == "4":
         afficher_permissions(cfg)
     elif choix == "1":
@@ -2548,7 +2552,7 @@ def assurer_acces_entreprise(cible, cwd=None):
         for i, (_, libelle) in enumerate(methodes, 1):
             print(f"    {i}. {libelle}")
         print("    0. Annuler")
-        choix = ask("Choix", "1")
+        choix = ask("Choix", "0")
         if not (choix.isdigit() and 1 <= int(choix) <= len(methodes)):
             raise Arret("ignore", "annule : rien n'a ete modifie")
         methode = methodes[int(choix) - 1][0]
@@ -2603,7 +2607,8 @@ def choisir_destination(cfg):
     print()
     print("    1. Le dossier git du repo de l'entreprise est deja sur ce PC")
     print("    2. Le cloner depuis le serveur de l'entreprise")
-    choix = ask("Choix", "1" if defaut else "2")
+    print("    0. Retour")
+    choix = ask("Choix", "0")
     if choix == "1":
         dest = nettoyer_chemin(ask("Emplacement du dossier git de l'entreprise", defaut))
     elif choix == "2":
@@ -2947,7 +2952,7 @@ def choisir_fonction(cfg):
     print("    1. Gerer les repos")
     print("    2. Synchroniser un repo sur l'ordinateur de l'entreprise")
     print("    0. Quitter")
-    choix = ask("Choix", "2" if cfg.get("mode") == "entreprise" else "1")
+    choix = ask("Choix", "0")
     if choix not in ("1", "2"):
         return None
     cfg["mode"] = "entreprise" if choix == "2" else "perso"
@@ -2976,7 +2981,7 @@ def menu_perso(cfg):
         print("    2. Gerer les repos locaux")
         print("    3. Compte GitHub")
         print("    0. Retour")
-        choix = saisie(c("\n  Choix : ", "1;33")).strip()
+        choix = ask("Choix", "0")
         if choix in ("0", "q", "quit", "exit"):
             return
         fn = {"1": act_depots, "2": act_depots_locaux, "3": act_compte}.get(choix)

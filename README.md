@@ -52,7 +52,9 @@ Une connexion gardée en mémoire s'efface à la fermeture du programme et aprè
 n'a pas, le programme la nomme : une fois ajoutée sur GitHub, elle s'applique
 au nouvel essai, sans reconnexion.
 
-Le menu principal propose ensuite deux options.
+Le menu principal propose ensuite deux options. Dans chaque menu, Entrée
+revient en arrière d'un niveau ; au menu principal, Entrée quitte le
+programme.
 
 ### Option 1 : gérer les repos
 
