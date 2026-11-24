@@ -82,10 +82,13 @@ programme.
 
 ### Option 2 : synchroniser un repo sur l'ordinateur de l'entreprise
 
-À utiliser sur l'ordinateur pro. Le programme demande d'abord le repo à
-récupérer, par exemple `SalehKamil/nom-du-projet`. Un repo privé est
-récupéré avec le compte GitHub connecté. Il demande ensuite où trouver le
-repo de l'entreprise :
+À utiliser sur l'ordinateur pro, connecté au compte GitHub perso. Le
+programme affiche les repos de ce compte :
+
+- Numéro d'un repo : le repo à récupérer.
+- U : saisir l'URL d'un repo GitHub.
+
+Il demande ensuite où trouver le repo de l'entreprise :
 
 1. Le dossier Git est déjà sur ce PC : indiquer son emplacement.
 2. Le cloner depuis le serveur de l'entreprise : indiquer son adresse.
@@ -93,6 +96,13 @@ repo de l'entreprise :
 La suite se fait sans chiffre à taper :
 
 - Connexion : compte de l'entreprise, séparé du compte perso.
+- Repo privé : le programme signale les fichiers secrets qu'il contient et
+  demande s'il peut devenir public le temps du clone. Avec la réponse non, il
+  est récupéré avec le compte connecté, sans devenir public.
+- Compte à rebours : après le clone, le repo reste public deux minutes, puis
+  redevient privé ; Entrée le rend privé tout de suite.
+- Rapport : forks, étoiles, vues et clones comptés par GitHub pendant
+  l'ouverture. GitHub peut mettre plusieurs heures à compter les vues.
 - Confirmation : liste des fichiers copiés ou supprimés, puis envoi.
 
 ## Sécurité

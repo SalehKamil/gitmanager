@@ -34,11 +34,14 @@ sans connexion, le programme s'arrete. Menu principal :
        avec nom, description et visibilite.
 
   2. Synchroniser un repo sur l'ordinateur de l'entreprise
-     Recupere le repo GitHub dans un dossier temporaire, sans identifiant
-     s'il est public, avec le compte connecte s'il est prive ; remplace le
-     contenu du dossier git du repo de l'entreprise par ce projet, puis
-     commit + push avec le compte de l'entreprise, seconde authentification
-     distincte du compte perso.
+     Affiche les repos du compte GitHub connecte, ou une URL saisie. Un repo
+     prive peut devenir public le temps du clone, avec accord : il redevient
+     prive apres un compte a rebours de 2 minutes, ou tout de suite avec
+     Entree, puis un rapport dit s'il a ete vu. Sans accord, il est recupere
+     avec le compte connecte. Le contenu du dossier git du repo de
+     l'entreprise est remplace par ce projet, puis commit + push avec le
+     compte de l'entreprise, seconde authentification distincte du compte
+     perso.
 
 Connexion : trois moyens, du plus sur au moins sur, avec un avertissement
 pour les moyens a risque. Par code ou par jeton : connexion gardee en memoire
@@ -63,16 +66,17 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "1.2.2"
+__version__ = "1.3.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -2811,16 +2815,173 @@ def mettre_a_jour_destination(cfg, racine, remote, branche):
         ok("Destination alignee sur la derniere version du serveur.")
 
 
+DUREE_PUBLIC = 120  # secondes pendant lesquelles le repo reste public apres le clone
+
+
+def choisir_repo_source(cfg):
+    """Repos du compte GitHub connecte, ou URL saisie. Retourne (url, repo ou None)."""
+    info("Chargement des repos du compte GitHub...")
+    repos = api_liste(cfg, "/user/repos?per_page=100&sort=pushed&affiliation=owner") or []
+    print()
+    if repos:
+        print(c(f"    {'#':>3}  {'Repo':<44} Visibilite", "90"))
+        for i, d in enumerate(repos, 1):
+            print(f"    {i:>3}. {d['full_name'][:44]:<44} {'prive' if d.get('private') else 'public'}")
+    else:
+        info("Aucun repo sur ce compte.")
+    print()
+    print("      U. Saisir l'URL d'un repo GitHub")
+    choix = ask("Numero d'un repo ou U, Entree pour revenir", "", obligatoire=False).lower()
+    if choix.isdigit() and 1 <= int(choix) <= len(repos):
+        d = repos[int(choix) - 1]
+        return d["clone_url"], d
+    if choix == "u":
+        saisie = ask("URL du repo, ou proprietaire/nom", cfg.get("source_depot", ""))
+        cfg["source_depot"] = saisie
+        sauver(cfg)
+        url = url_source(saisie)
+        h, o, r = infos_url(url)
+        if o and h == host(cfg):
+            code, rep, _ = requete(cfg, "GET", f"/repos/{o}/{r}")
+            if code == 200 and isinstance(rep, dict):
+                return url, rep
+        return url, None
+    if choix:
+        warn("Choix invalide.")
+    raise Arret("ignore", "annule")
+
+
+def compteurs(cfg, full):
+    """Forks, etoiles, vues et clones comptes par GitHub, sans aucune question."""
+    etat = {}
+    code, rep, _ = requete(cfg, "GET", f"/repos/{full}")
+    if code == 200 and isinstance(rep, dict):
+        etat["forks"], etat["etoiles"] = rep.get("forks_count", 0), rep.get("stargazers_count", 0)
+    for cle, chemin in (("vues", "views"), ("clones", "clones")):
+        code, rep, _ = requete(cfg, "GET", f"/repos/{full}/traffic/{chemin}")
+        if code == 200 and isinstance(rep, dict):
+            etat[cle] = rep.get("count", 0)
+    return etat
+
+
+def _horodatage(texte):
+    try:
+        return datetime.strptime(texte, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except (TypeError, ValueError):
+        return 0
+
+
+def rapport_exposition(cfg, full, avant, debut, fin):
+    """Ce qui s'est passe pendant l'ouverture publique du repo."""
+    apres = compteurs(cfg, full)
+    duree = int(fin - debut)
+    print()
+    info(f"Ouverture publique de {full} : {duree // 60} min {duree % 60:02d} s.")
+    vu = False
+    code, forks, _ = requete(cfg, "GET", f"/repos/{full}/forks?sort=newest&per_page=30")
+    nouveaux = [f["full_name"] for f in forks if _horodatage(f.get("created_at")) >= debut - 5] \
+        if code == 200 and isinstance(forks, list) else []
+    if nouveaux:
+        vu = True
+        err("Fork cree pendant l'ouverture : il reste public, meme avec le repo prive.")
+        for n in nouveaux:
+            print("       " + n)
+    else:
+        print("       forks crees : 0")
+    for cle, libelle, propres in (("etoiles", "etoiles ajoutees", 0), ("vues", "vues comptees par GitHub", 0),
+                                  ("clones", "autres clones comptes par GitHub", 1)):
+        if cle in avant and cle in apres:
+            ecart = max(0, apres[cle] - avant[cle] - propres)  # le clone de gitmanager est retire
+            print(f"       {libelle} : {ecart}")
+            vu = vu or ecart > 0
+    if "vues" not in apres:
+        info("Vues et clones non disponibles avec cette connexion.")
+    if vu:
+        warn("Le repo a ete vu ou copie pendant l'ouverture.")
+    else:
+        ok("Aucune visite comptee pour l'instant.")
+    info("GitHub peut mettre plusieurs heures a compter les vues et les clones : le detail")
+    info(f"reste visible sur https://{host(cfg)}/{full}/graphs/traffic")
+
+
+def rendre_prive(cfg, full):
+    for _ in range(3):
+        code, _, _ = requete(cfg, "PATCH", f"/repos/{full}", {"private": True})
+        if code == 200:
+            ok(f"{full} est de nouveau prive.")
+            return True
+        time.sleep(1)
+    err(f"{full} EST TOUJOURS PUBLIC : le rendre prive sur https://{host(cfg)}/{full}/settings")
+    return False
+
+
+def compte_a_rebours(secondes, full):
+    """Compte a rebours ; Entree l'arrete. Retourne (Entree pressee, evenement)."""
+    appui = threading.Event()
+
+    def lire():
+        try:
+            sys.stdin.readline()
+        except Exception:
+            pass
+        appui.set()
+
+    threading.Thread(target=lire, daemon=True).start()
+    fin = time.time() + secondes
+    while not appui.is_set():
+        reste = int(fin - time.time() + 0.999)
+        if reste <= 0:
+            break
+        print(f"\r  {full} public encore {reste // 60}:{reste % 60:02d}, Entree pour le rendre "
+              "prive maintenant ", end="", flush=True)
+        appui.wait(1)
+    print()
+    return appui.is_set(), appui
+
+
+def recuperer_avec_ouverture(cfg, d, dossier):
+    """Repo prive : public le temps du clone, puis prive apres un compte a rebours.
+    Sans accord, il est recupere avec le compte connecte, sans devenir public."""
+    full = d["full_name"]
+    print()
+    warn(f"{full} est prive.")
+    info("Pour le cloner sans identifiants, il peut devenir public le temps du clone,")
+    duree = f"{DUREE_PUBLIC // 60} minutes" if DUREE_PUBLIC % 60 == 0 else f"{DUREE_PUBLIC} secondes"
+    info(f"puis redevenir prive apres {duree}. Pendant ce temps, n'importe")
+    info("qui peut le voir et le copier, historique compris.")
+    sensibles = sensibles_sur_github(cfg, d)
+    if sensibles:
+        err("Ce repo contient des fichiers secrets, qui deviendraient publics :")
+        for chemin in sensibles[:20]:
+            print("       " + chemin)
+    if not ask_yn("Accepter que le repo devienne public le temps du clone ?", False):
+        info("Le repo reste prive : recuperation avec le compte GitHub connecte.")
+        return recuperer_source(cfg, d["clone_url"], dossier)[0]
+    avant = compteurs(cfg, full)
+    code, rep, _ = api(cfg, "PATCH", f"/repos/{full}", {"private": False})
+    if code != 200:
+        raise Arret("erreur", f"le repo n'a pas pu devenir public, code {code} : {message_api(rep)}")
+    debut = time.time()
+    warn(f"{full} est public.")
+    presse, appui = False, None
+    try:
+        source = recuperer_source(cfg, d["clone_url"], dossier)[0]
+        presse, appui = compte_a_rebours(DUREE_PUBLIC, full)
+    finally:
+        fin = time.time()
+        rendre_prive(cfg, full)  # meme apres une erreur ou un Ctrl+C
+    if appui and not presse:
+        info("Entree pour continuer.")
+        appui.wait()
+    rapport_exposition(cfg, full, avant, debut, fin)
+    return source
+
+
 def act_synchroniser(cfg):
     titre("Synchroniser un repo sur l'ordinateur de l'entreprise")
     info("Le repo GitHub est recupere, puis envoye dans le repo de")
     info("l'entreprise avec le compte de l'entreprise.")
-    print()
-    saisie = ask("Repo a recuperer : proprietaire/nom, URL ou dossier",
-                 cfg.get("source_depot", ""))
-    url = url_source(saisie)
-    cfg["source_depot"] = saisie
-    sauver(cfg)
+    url, d = choisir_repo_source(cfg)
     dest, racine = choisir_destination(cfg)
     branche, remote = preparer(cfg, racine, auto=False)
     assurer_acces_entreprise(remote, cwd=racine)
@@ -2829,19 +2990,18 @@ def act_synchroniser(cfg):
     mettre_a_jour_destination(cfg, racine, remote, branche)
     temp = tempfile.mkdtemp(prefix="gitmanager-")
     try:
-        source, avec_jeton = recuperer_source(cfg, url, temp)
+        if d and d.get("private") and (d.get("permissions") or {}).get("admin"):
+            source = recuperer_avec_ouverture(cfg, d, temp)
+        else:
+            source = recuperer_source(cfg, url, temp)[0]
         if not remplacer_contenu(source, dest):
             return "ignore", "annule : le repo de l'entreprise n'a pas ete modifie"
         print()
         committer(cfg, racine, proposer_gitignore=False)
-        statut, detail = pousser(cfg, racine, remote, branche)
+        return pousser(cfg, racine, remote, branche)
     finally:
         supprimer_dossier(temp)  # aucune copie du projet ne reste sur le disque
         MODE.update(utilisateur="", jeton="")
-    if statut == "ok" and not avec_jeton and url.startswith("https://github.com/"):
-        info("Penser a repasser le repo en prive depuis l'ordinateur perso, s'il")
-        info("n'a pas a rester public.")
-    return statut, detail
 
 
 # Menus
