@@ -71,8 +71,10 @@ Le menu principal propose aussi, sous les deux options :
 Un compte gardé sur la machine, sans session ouverte, se supprime avec le
 choix Supprimer le compte de cette machine.
 
-Chaque commande Git qui change un repo s'affiche avec sa sortie : `git add`,
-`git commit`, `git push`, `git pull` et les autres.
+Chaque commande Git qui change un repo s'affiche, avec son résultat en
+français : `git add`, `git commit`, `git push`, `git pull` et les autres. Tout
+le programme s'affiche en français : les messages en anglais de Git, de GitHub
+CLI, des installateurs et de GitHub sont traduits ou cachés.
 
 Dans chaque menu, Enter revient en arrière d'un niveau ; au menu principal,
 Enter quitte le programme.

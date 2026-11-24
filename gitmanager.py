@@ -62,7 +62,11 @@ renouvelle seul. 2. Saisir un jeton : dans la session seulement, jamais sur
 le disque, fin apres 15 minutes sans action et a la fermeture du programme.
 La connexion par code apparait quand l'application GitHub de gitmanager est
 configuree. Les commandes Git qui changent un repo s'affichent avec leur
-sortie.
+resultat.
+
+Tout s'affiche en francais : les messages en anglais de Git, de GitHub CLI,
+des installateurs et de GitHub sont traduits ou caches. GITMANAGER_DEBUG=1
+garde le detail technique des erreurs.
 
 Securite : HTTPS ou SSH seulement, certificats toujours verifies, aucun
 jeton ecrit sur le disque, dans une URL ni sur la ligne de commande ; alerte
@@ -92,7 +96,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.7.0"
+__version__ = "2.8.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -137,6 +141,8 @@ EMPLACEMENTS = ("", "Documents", "Desktop", "Bureau", "Projects", "Projets",
                 "projets", "dev", "code", "src", "repos", "source/repos", "GitHub",
                 "Documents/GitHub", "OneDrive/Documents", "workspace")
 
+# GITMANAGER_DEBUG=1 : les erreurs gardent leur detail technique, en anglais
+DEBUG = bool(os.environ.get("GITMANAGER_DEBUG"))
 BRUIT_GIT = re.compile(r"(LF will be replaced by CRLF|CRLF will be replaced by LF)", re.I)
 STATUTS = {"A": "nouveau", "M": "modif", "D": "retrait", "R": "nouveau nom",
            "C": "copie", "T": "modif", "U": "conflit"}
@@ -410,17 +416,108 @@ def git(*args, cwd=None, quiet=False, env=None):
     if montrer:
         for flux in (out, errs):
             for ligne in flux.strip().splitlines():
-                if not BRUIT_GIT.search(ligne):
-                    print("     " + ligne)
+                texte = traduire_git(ligne)
+                if texte:
+                    print("     " + texte)
     return p.returncode, out, errs
 
 
 def git_direct(*args, cwd=None):
-    """git avec affichage en direct (progression d'un clone, etc.)."""
+    """git avec progression en direct, en francais : clone d'un repo."""
     if VOIR_GIT["actif"]:
         print(c("  $ git " + _affiche(args), "36"))
-    return subprocess.run(["git"] + [str(a) for a in args], cwd=cwd,
-                          env=_env_git()).returncode
+    args = [str(a) for a in args]
+    if args and args[0] == "clone":
+        args.insert(1, "--progress")
+    p = subprocess.Popen(["git"] + args, cwd=cwd, env=_env_git(), stdin=subprocess.DEVNULL,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                         encoding="utf-8", errors="replace")
+    phase, lignes = "", []
+    for ligne in p.stdout:  # les retours chariot de la progression coupent aussi les lignes
+        ligne = ligne.strip()
+        if not ligne:
+            continue
+        lignes.append(ligne)
+        etape = progression_git(ligne)
+        if etape:
+            nom, pourcent = etape
+            if nom != phase and phase:
+                print()
+            phase = nom
+            print(f"\r     {nom} : {pourcent} %   ", end="", flush=True)
+    code = p.wait()
+    if phase:
+        print()
+    if code != 0:
+        info(expliquer("\n".join(lignes[-5:])))
+    return code
+
+
+PHASES_GIT = (("Enumerating objects", "Liste des objets"), ("Counting objects", "Comptage"),
+              ("Compressing objects", "Compression"), ("Receiving objects", "Copie des objets"),
+              ("Resolving deltas", "Assemblage"), ("Updating files", "Fichiers"),
+              ("Writing objects", "Envoi des objets"))
+
+
+def progression_git(ligne):
+    """Etape de progression de git en francais : (nom, pourcentage) ou None."""
+    for anglais, francais in PHASES_GIT:
+        m = re.search(anglais + r":\s+(\d+)%", ligne)
+        if m:
+            return francais, m.group(1)
+    return None
+
+
+# Messages courants de git, en francais ; les autres ne s'affichent pas
+TRADUCTIONS_GIT = (
+    (r"^\[(\S+)(?: \(root-commit\))? ([0-9a-f]{7,})\] (.*)$", "commit {2} sur {1} : {3}"),
+    (r"^(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?",
+     "{1} fichier(s), lignes en plus : {2}, en moins : {3}"),
+    (r"^create mode \d+ (.+)$", "nouveau : {1}"),
+    (r"^delete mode \d+ (.+)$", "retrait : {1}"),
+    (r"^rename (.+) \(\d+%\)$", "nouveau nom : {1}"),
+    (r"^mode change \d+ => \d+ (.+)$", "mode : {1}"),
+    (r"^branch '(.+)' set up to track '(.+)'\.?$", "la branche {1} suit {2}"),
+    (r"^To (.+)$", "serveur : {1}"),
+    (r"^From (.+)$", "serveur : {1}"),
+    (r"^\+?\s*([0-9a-f]+)\.\.\.?([0-9a-f]+)\s+(\S+)\s+->\s+(\S+)\s+\(forced update\)$",
+     "{4} : {1} -> {2}, force push"),
+    (r"^([0-9a-f]+)\.\.([0-9a-f]+)\s+(\S+)\s+->\s+(\S+)$", "{4} : {1} -> {2}"),
+    (r"^\*\s+\[new branch\]\s+(\S+)\s+->\s+(\S+)$", "nouvelle branche : {2}"),
+    (r"^\*\s+\[new tag\]\s+(\S+)\s+->\s+(\S+)$", "nouveau tag : {2}"),
+    (r"^\*\s+branch\s+(\S+)\s+->\s+(\S+)$", "branche lue : {1}"),
+    (r"^Everything up-to-date$", "rien de nouveau"),
+    (r"^Already up.to.date\.?$", "rien de nouveau"),
+    (r"^Successfully rebased and updated (.+)\.$", "rebase OK"),
+    (r"^Fast-forward$", "avance simple"),
+    (r"^Updating ([0-9a-f]+)\.\.([0-9a-f]+)$", "{1} -> {2}"),
+    (r"^(?:Initialized empty|Reinitialized existing) Git repository in (.+)$", "repo git : {1}"),
+    (r"^Switched to (?:a new )?branch '(.+)'$", "branche : {1}"),
+    (r"^Created autostash: ([0-9a-f]+)$", "changements sans commit mis en attente"),
+    (r"^Applied autostash\.?$", "changements sans commit repris"),
+    (r"^Cloning into '(.+)'\.\.\.$", "clone dans {1}"),
+    (r"^Auto-merging (.+)$", "fusion auto : {1}"),
+    (r"^CONFLICT \(.+\): Merge conflict in (.+)$", "conflit : {1}"),
+    (r"^Deleted branch (\S+)", "branche {1} : suppression OK"),
+    (r"^rm '(.+)'$", "retrait : {1}"),
+    (r"^nothing to commit", "rien pour un commit"),
+    (r"^remote: Create a pull request for '(.+)' on GitHub by visiting:$",
+     "pull request pour {1} sur GitHub :"),
+    (r"^remote:\s+(https://\S+)$", "{1}"),
+)
+
+
+def traduire_git(ligne):
+    """Ligne de git en francais, ou None : rien en anglais ne s'affiche."""
+    ligne = ligne.strip()
+    if not ligne or BRUIT_GIT.search(ligne):
+        return None
+    for motif, modele in TRADUCTIONS_GIT:
+        m = re.search(motif, ligne)
+        if m:
+            groupes = [""] + [g or "0" for g in m.groups()]
+            return re.sub(r"\{(\d)\}", lambda x: groupes[int(x.group(1))], modele)
+    return None
 
 
 def derniere_ligne(texte):
@@ -850,7 +947,7 @@ def installer_outil(outil, mise_a_jour=False):
         if outil == "git" and sys.platform == "darwin":
             info("Les outils Xcode d'Apple contiennent Git : suivre les instructions.")
             if ask_yn("Les installer maintenant ?", True):
-                subprocess.run(["xcode-select", "--install"])
+                run(["xcode-select", "--install"])
                 info("Relancer le programme une fois l'installation finie.")
             return False
         info(f"Installer {nom} depuis " + ("https://git-scm.com/downloads" if outil == "git"
@@ -859,9 +956,17 @@ def installer_outil(outil, mise_a_jour=False):
     verbe = "Actualiser" if mise_a_jour else "Installer"
     if not ask_yn(f"{verbe} {nom}, version la plus neuve, avec {g} ?", True):
         return False
+    info("Installation en cours, cela peut prendre quelques minutes...")
+    if any(cmd[:1] == ["sudo"] for cmd in commandes_paquet(g, PAQUETS[outil][g], mise_a_jour)):
+        info("sudo peut demander le mot de passe de cette machine.")
     for cmd in commandes_paquet(g, PAQUETS[outil][g], mise_a_jour):
         print(c("  $ " + " ".join(cmd), "36"))
-        subprocess.run(cmd)
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                           encoding="utf-8", errors="replace")
+        if p.returncode != 0:
+            warn(f"{g} : code de sortie {p.returncode}.")
+            if DEBUG:
+                print(p.stdout[-2000:])
     actualiser_path()
     if outil == "gh":
         pret = bool(chemin_gh())
@@ -1052,8 +1157,8 @@ def requete(cfg, verbe, chemin, data=None, token=None):
             return r.status, _json(r.read()), r.headers
     except urllib.error.HTTPError as e:
         return e.code, _json(e.read()), (e.headers or {})
-    except (urllib.error.URLError, OSError) as e:
-        return 0, {"message": f"internet : {getattr(e, 'reason', e)}"}, {}
+    except (urllib.error.URLError, OSError):
+        return 0, {"message": "aucune connexion internet"}, {}
 
 
 def identite_par_defaut(cfg, user, cle):
@@ -1177,8 +1282,8 @@ def connexion_par_code(cfg):
     cid, h = client_id(cfg), host(cfg)
     try:
         dem = _formulaire(f"https://{h}/login/device/code", {"client_id": cid})
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        err(f"Connexion par code impossible : {getattr(e, 'reason', e)}")
+    except (urllib.error.URLError, OSError, ValueError):
+        err("Connexion par code impossible : aucune connexion internet.")
         return False
     if "user_code" not in dem:
         err("Connexion par code impossible : " + str(dem.get("error_description") or dem.get("error")))
@@ -1261,6 +1366,35 @@ def connexion_interactive(cfg, autre_compte=False):
             return True
 
 
+def gh_par_navigateur(args):
+    """Commande GitHub CLI qui passe par le navigateur, sans son texte en anglais :
+    le code a usage unique et l'adresse s'affichent en francais, et la page
+    s'ouvre dans le navigateur. Retourne le code de sortie de GitHub CLI."""
+    env = dict(os.environ, GH_PROMPT_DISABLED="1", NO_COLOR="1", GH_NO_UPDATE_NOTIFIER="1")
+    p = subprocess.Popen([chemin_gh()] + args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                         env=env)
+    code_vu, adresse_vue = False, False
+    for ligne in p.stdout:
+        code = re.search(r"\b([A-Z0-9]{4}-[A-Z0-9]{4})\b", ligne)
+        adresse = re.search(r"(https://\S+)", ligne)
+        if code and not code_vu:
+            code_vu = True
+            print()
+            info("Code pour la page GitHub :")
+            print(c(f"       {code.group(1)}", "1;33"))
+        elif adresse and not adresse_vue and "device" in adresse.group(1):
+            adresse_vue = True
+            ouvrir_navigateur(adresse.group(1).rstrip("."))
+            info("Coller le code dans la page, puis cliquer sur 'Authorize'.")
+            info("Attente de la validation, Ctrl+C pour annuler...")
+        elif "Authentication complete" in ligne:
+            ok("Autorisation GitHub OK.")
+        elif DEBUG and ligne.strip():
+            print("     " + ligne.rstrip())
+    return p.wait()
+
+
 def gh_jetons_expirants():
     """GitHub CLI 2.103 ou plus sait demander un jeton qui expire et se renouvelle
     seul : option --expiring, plus sure qu'un jeton sans fin."""
@@ -1306,15 +1440,11 @@ def connexion_navigateur(cfg, autre_compte=False):
     info(f"Connexion avec {NOMS_METHODES[methode]} sur {h}...")
     tok = ""
     if methode == "gh":
-        info("Copier le code de 8 lettres et chiffres, taper Enter,")
-        info("puis le coller dans la page qui s'ouvre et cliquer sur 'Authorize'.")
-        print()
-        cmd = [chemin_gh(), "auth", "login", "--web", "-h", h, "-p", "https"]
+        cmd = ["auth", "login", "--web", "-h", h, "-p", "https"]
         if gh_jetons_expirants():
             cmd.append("--expiring")
             info("Jeton valable quelques heures, puis GitHub CLI en demande un autre tout seul.")
-        p = subprocess.run(cmd)
-        if p.returncode != 0:
+        if gh_par_navigateur(cmd) != 0:
             err("Connexion impossible ou abandon.")
             return False
         run([chemin_gh(), "auth", "setup-git", "-h", h])
@@ -1682,9 +1812,8 @@ def mettre_a_jour_permissions(cfg, besoin, hdr=None):
     scopes = (hdr or {}).get("X-Accepted-OAuth-Scopes") if hdr else ""
     if SESSION["methode"] == "gh" and scopes:
         info("GitHub CLI demande cette permission dans le navigateur.")
-        p = subprocess.run([chemin_gh(), "auth", "refresh", "-h", host(cfg), "-s",
-                            ",".join(s.strip() for s in scopes.split(",") if s.strip())])
-        if p.returncode == 0:
+        if gh_par_navigateur(["auth", "refresh", "-h", host(cfg), "-s",
+                              ",".join(s.strip() for s in scopes.split(",") if s.strip())]) == 0:
             SESSION["token"] = token_silencieux(cfg, "gh")
             return bool(SESSION["token"])
         return False
@@ -1720,8 +1849,27 @@ def api(cfg, verbe, chemin, data=None):
     return code, rep, hdr
 
 
+MESSAGES_API = (("aucune connexion internet", "aucune connexion internet"),
+                ("bad credentials", "identifiants faux ou trop anciens"),
+                ("rate limit", "limite d'appels GitHub : attendre un peu"),
+                ("name already exists", "ce nom existe sur ce compte"),
+                ("resource not accessible", "permission manquante"),
+                ("must have admin", "droits admin requis"),
+                ("requires authentication", "connexion requise"),
+                ("repository creation failed", "nouveau repo impossible"),
+                ("validation failed", "demande invalide"),
+                ("not found", "introuvable"))
+
+
 def message_api(rep):
-    return rep.get("message", "") if isinstance(rep, dict) else ""
+    """Message d'erreur de l'API GitHub, en francais."""
+    if not isinstance(rep, dict) or not rep:
+        return "pas de retour"
+    texte = json.dumps(rep).lower()
+    for anglais, francais in MESSAGES_API:
+        if anglais in texte:
+            return francais
+    return "refus de GitHub" + (f" : {rep.get('message')}" if DEBUG and rep.get("message") else "")
 
 
 def api_liste(cfg, chemin):
@@ -1762,9 +1910,29 @@ def expliquer(sortie):
         return "serveur injoignable : voir la connexion internet ou le VPN de l'entreprise"
     if "gh001" in s or "file size limit" in s or "large files" in s:
         return "un fichier fait plus de 100 Mo, la limite de GitHub"
-    if "rejected" in s:
+    if "rejected" in s or "fetch first" in s or "non-fast-forward" in s:
         return "le serveur a des changements plus neufs : relancer l'envoi"
-    return derniere_ligne(sortie) or "erreur inconnue"
+    if "does not appear to be a git repository" in s or "does not exist" in s:
+        return "repo introuvable : voir l'adresse"
+    if "not a git repository" in s:
+        return "ce dossier n'est pas un repo git"
+    if "please tell me who you are" in s or "empty ident" in s:
+        return "nom et email des commits manquants"
+    if "index.lock" in s:
+        return "un autre programme git tourne sur ce repo : le fermer, puis recommencer"
+    if "would be overwritten" in s or "your local changes" in s:
+        return "des changements sans commit bloquent l'action : faire un commit avant"
+    if "unrelated histories" in s:
+        return "les deux historiques n'ont aucun lien"
+    if "ssl certificate" in s or "certificate verify failed" in s:
+        return "certificat SSL invalide : voir le proxy de l'entreprise"
+    if "does not match any" in s:
+        return "aucun commit sur cette branche"
+    if "conflict" in s:
+        return "conflit entre ce dossier et le serveur"
+    if DEBUG and derniere_ligne(sortie):
+        return "erreur de git : " + derniere_ligne(sortie)
+    return "erreur de git"
 
 
 def nettoyer_depot(chemin, bavard=True):
@@ -1873,7 +2041,7 @@ def committer(cfg, chemin, message=None, auto=False, proposer_gitignore=True):
             ok("Nouveau .gitignore")
     code, _, e = git("add", "-A", cwd=chemin, quiet=auto)
     if code != 0:
-        raise Arret("erreur", "erreur de git add : " + derniere_ligne(e))
+        raise Arret("erreur", "erreur de git add : " + expliquer(e))
     exclus = proteger_fichiers(chemin, auto)
     if git("diff", "--cached", "--quiet", cwd=chemin, quiet=True)[0] == 0:
         if not auto:
@@ -1889,7 +2057,7 @@ def committer(cfg, chemin, message=None, auto=False, proposer_gitignore=True):
     assurer_identite(cfg, chemin, auto)
     code, out, e = git("commit", "-m", message or message_defaut(), cwd=chemin, quiet=auto)
     if code != 0:
-        raise Arret("erreur", "refus du commit : " + derniere_ligne(e or out))
+        raise Arret("erreur", "refus du commit : " + expliquer(e or out))
     if not auto and exclus:
         info(f"{len(exclus)} fichier(s) exclu(s) de l'envoi.")
     return len(changements)
@@ -1951,7 +2119,7 @@ def integrer(cfg, chemin, remote, branche, auto, pour_envoi=False):
     if not a_des_commits(chemin):  # rien en local : on prend la version du serveur
         code, _, e = git("merge", "--ff-only", distante, cwd=chemin, quiet=auto)
         if code != 0:
-            raise Arret("erreur", "pull impossible : " + derniere_ligne(e))
+            raise Arret("erreur", "pull impossible : " + expliquer(e))
         return branche, nb_commits(chemin)
 
     _, retard = avance_retard(chemin, remote, branche) or (0, 0)
@@ -1975,7 +2143,7 @@ def integrer(cfg, chemin, remote, branche, auto, pour_envoi=False):
             code, _, e = git("merge", "-s", "ours", "--allow-unrelated-histories", "-m",
                              "Remplacement par la version de ce dossier", distante, cwd=chemin)
             if code != 0:
-                raise Arret("erreur", "remplacement impossible : " + derniere_ligne(e))
+                raise Arret("erreur", "remplacement impossible : " + expliquer(e))
             return branche, 0
 
     if not auto:
@@ -1984,7 +2152,7 @@ def integrer(cfg, chemin, remote, branche, auto, pour_envoi=False):
     if code == 0:
         return branche, retard
     if operation_en_cours(chemin) != "rebase":
-        raise Arret("erreur", "combinaison impossible : " + derniere_ligne(e or out))
+        raise Arret("erreur", "combinaison impossible : " + expliquer(e or out))
     conflits = fichiers_en_conflit(chemin)
     liste = ", ".join(conflits[:5]) + (" ..." if len(conflits) > 5 else "")
     if not auto:
@@ -2681,8 +2849,8 @@ def ouvrir_explorateur(chemin):
             subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              start_new_session=True)
         ok(f"Dossier ouvert dans le gestionnaire de fichiers : {chemin}")
-    except OSError as e:
-        warn(f"Ouverture du dossier impossible, {e} : {chemin}")
+    except OSError:
+        warn(f"Ouverture du dossier impossible : {chemin}")
 
 
 def menu_depot(cfg, d, locaux):
@@ -3509,7 +3677,7 @@ def mettre_a_jour_destination(cfg, racine, remote, branche):
         code, _, e = git("merge", "--ff-only", f"{remote}/{branche}", cwd=racine)
         if code != 0:
             raise Arret("erreur", "pull de la destination impossible : "
-                        + derniere_ligne(e))
+                        + expliquer(e))
         ok("Destination pareille au serveur.")
 
 
@@ -3904,7 +4072,9 @@ def lancer(fn, cfg, avec_pause=True):
         print()
         warn("Interruption.")
     except Exception as e:
-        err(f"Erreur inattendue : {e}")
+        err("Erreur inattendue dans le programme : relancer l'action.")
+        if DEBUG:
+            err(f"{type(e).__name__} : {e}")
     if avec_pause:
         pause()
 
