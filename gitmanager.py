@@ -102,7 +102,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.11.0"
+__version__ = "2.11.1"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -497,8 +497,8 @@ TRADUCTIONS_GIT = (
     (r"^Updating ([0-9a-f]+)\.\.([0-9a-f]+)$", "{1} -> {2}"),
     (r"^(?:Initialized empty|Reinitialized existing) Git repository in (.+)$", "repo git : {1}"),
     (r"^Switched to (?:a new )?branch '(.+)'$", "branche : {1}"),
-    (r"^Created autostash: ([0-9a-f]+)$", "changements sans commit mis en attente"),
-    (r"^Applied autostash\.?$", "changements sans commit repris"),
+    (r"^Created autostash: ([0-9a-f]+)$", "changements, commit manquant : mis en attente"),
+    (r"^Applied autostash\.?$", "changements, commit manquant : repris"),
     (r"^Cloning into '(.+)'\.\.\.$", "clone dans {1}"),
     (r"^Auto-merging (.+)$", "fusion auto : {1}"),
     (r"^CONFLICT \(.+\): Merge conflict in (.+)$", "conflit : {1}"),
@@ -1979,7 +1979,7 @@ def expliquer(sortie):
     if "index.lock" in s:
         return "un autre programme git tourne sur ce repo : le fermer, puis recommencer"
     if "would be overwritten" in s or "your local changes" in s:
-        return "des changements sans commit bloquent l'action : faire un commit avant"
+        return "des changements, commit manquant, bloquent l'action : faire un commit avant"
     if "unrelated histories" in s:
         return "les deux historiques n'ont aucun lien"
     if "ssl certificate" in s or "certificate verify failed" in s:
@@ -2487,7 +2487,7 @@ def entete_projet(chemin):
     print(c(f"  Projet  : {chemin}", "1"))
     print(f"  Branche : {branche or 'HEAD hors branche'}     "
           f"Serveur : {url_web(url) or url or c('sans lien', '33')}")
-    etat = [f"{len(modifs)} fichier(s) sans commit"]
+    etat = [f"{len(modifs)} fichier(s), commit manquant"]
     if remote and branche:
         ar = avance_retard(chemin, remote, branche)
         if ar is None:
@@ -2590,7 +2590,7 @@ def act_supprimer_git(cfg, chemin):
     ar = avance_retard(chemin, remote, branche) if remote and branche else None
     if modifs or (ar and ar[0]) or (remote and branche and ar is None and a_des_commits(chemin)):
         warn("Attention : une partie du travail n'est PAS sur GitHub : "
-             f"{len(modifs)} fichier(s) sans commit, "
+             f"{len(modifs)} fichier(s), commit manquant, "
              f"{ar[0] if ar else 'des'} commit(s) sans push.")
     if ask("Taper SUPPRIMER en majuscules pour confirmer", "", obligatoire=False) != "SUPPRIMER":
         info("Abandon.")
@@ -2698,15 +2698,15 @@ def lier_et_recevoir(cfg, chemin, url):
             print(f"       ... et {len(suivis) - 20} autre(s)")
         print()
         print("    1. Prendre la version en ligne : pull, ces fichiers partent dans git stash")
-        print("    2. Garder les fichiers de ce dossier : changements sans commit")
+        print("    2. Garder les fichiers de ce dossier, commit manquant")
         if ask("Choix", "1") == "1":
             git("stash", "push", "-m", "gitmanager : fichiers avant le pull", cwd=chemin)
             ok("Version en ligne OK dans ce dossier.")
             info("Fichiers d'avant dans git stash : git stash pop pour les reprendre.")
         else:
-            info("Les fichiers de ce dossier restent, comme changements sans commit.")
+            info("Les fichiers de ce dossier restent, commit manquant.")
     if nouveaux:
-        info(f"{nouveaux} fichier(s) absent(s) du repo en ligne restent, sans commit.")
+        info(f"{nouveaux} fichier(s) absent(s) du repo en ligne restent, commit manquant.")
     return "ok", f"lien avec {url_web(url) or url}, branche {branche}"
 
 
@@ -2836,11 +2836,11 @@ def act_depots_locaux(cfg):
         if ask_yn("Envoyer un dossier sur GitHub ?", True):
             act_autre_dossier(cfg)
         return
-    print(c(f"    {'#':>3}  {'Repo':<44} {'Sans commit':>11}  GitHub", "1"))
+    print(c(f"    {'#':>3}  {'Repo':<44} {'Commit manquant':>15}  GitHub", "1"))
     for i, (p, (url, modifs, _)) in enumerate(zip(projets, apercu_projets(projets)), 1):
         nom = nom_court(p)
         nom = nom if len(nom) <= 44 else "~" + nom[-43:]
-        print(f"    {i:>3}. {nom:<44} {modifs:>11}  {lien_court(url)}")
+        print(f"    {i:>3}. {nom:<44} {modifs:>15}  {lien_court(url)}")
     print()
     print("      N. Envoyer un autre dossier sur GitHub")
     print("      T. Tous les repos d'un dossier : push ou pull")
@@ -2868,10 +2868,10 @@ def act_tout(cfg):
         warn("Aucun projet git dans ce dossier ni dans ses sous-dossiers.")
         return
     print()
-    print(c(f"    {'Projet':<28} {'Branche':<12} {'Sans commit':>11}  Serveur", "1"))
+    print(c(f"    {'Projet':<28} {'Branche':<12} {'Commit manquant':>15}  Serveur", "1"))
     for p, (url, modifs, branche) in zip(projets, apercu_projets(projets, True)):
         nom = os.path.relpath(p, dossier) if p != dossier else os.path.basename(p)
-        print(f"    {nom[:28]:<28} {branche[:12]:<12} {modifs:>11}  {lien_court(url)}")
+        print(f"    {nom[:28]:<28} {branche[:12]:<12} {modifs:>15}  {lien_court(url)}")
     print()
     print("    1. Tout envoyer : commit + push de chaque repo")
     print("    2. Tout recevoir : pull de chaque repo")
@@ -3144,7 +3144,7 @@ def fichiers_en_local(chemin):
 
 
 def etats_locaux(chemin):
-    """{fichier: code XY de git status} des fichiers modifies sans commit."""
+    """{fichier: code XY de git status} des fichiers au commit manquant."""
     _, out, _ = git("status", "--porcelain", "-z", cwd=chemin, quiet=True)
     etats = {}
     for rec in (r for r in out.split("\0") if len(r) > 3):
@@ -3261,7 +3261,7 @@ def comparer_copies(cfg, d, chemin):
         ["Commits en avance", seulement_ligne, seulement_local],
         ["Fichiers", len(f_ligne), len(f_local)],
         ["Taille", taille(sum(f_ligne.values())), taille(sum(f_local.values()))],
-        ["Fichiers sans commit", "-", len(etats)],
+        ["Fichiers, commit manquant", "-", len(etats)],
     ]
     couleurs = {}
     if lc["court"] != ll["court"] and lc["epoch"] != ll["epoch"]:
@@ -3284,7 +3284,7 @@ def comparer_copies(cfg, d, chemin):
     if seulement_local:
         info(f"En local : {seulement_local} commit(s) en avance, pour les mettre en ligne : Envoyer.")
     if etats:
-        info(f"En local : {len(etats)} fichier(s) sans commit.")
+        info(f"En local : {len(etats)} fichier(s), commit manquant.")
     if not ecarts:
         ok("Les fichiers sont pareils dans les deux copies, seuls les commits changent.")
         return None
@@ -3303,12 +3303,12 @@ def comparer_copies(cfg, d, chemin):
             if xy:
                 quand_local = int(os.lstat(os.path.join(chemin, fichier)).st_mtime)
                 date_texte = datetime.fromtimestamp(quand_local).strftime("%Y-%m-%d %H:%M")
-                etat = "nouveau, sans commit" if xy == "??" else "sans commit"
+                etat = "nouveau, commit manquant" if xy == "??" else "commit manquant"
             else:
                 (date_texte, quand_local), etat = date_fichier(chemin, "HEAD", fichier), ""
             d_local = (None if texte is None else len(texte), f_local.get(fichier), date_texte, etat)
         else:
-            d_local = "absent, sans commit" if "D" in xy else "absent"
+            d_local = "absent, commit manquant" if "D" in xy else "absent"
         if quand_ligne and quand_local and quand_ligne != quand_local:
             recents[(n, 1 if quand_ligne > quand_local else 2)] = "32"
         brut.append((fichier, d_ligne, d_local))
@@ -3816,7 +3816,7 @@ def mettre_a_jour_destination(cfg, racine, remote, branche):
     """Aligne la destination sur le serveur avant la copie (fast-forward)."""
     modifs = fichiers_modifies(racine)
     if modifs:
-        warn(f"La destination a {len(modifs)} changement(s) sans commit :")
+        warn(f"La destination a {len(modifs)} changement(s), commit manquant :")
         for l in modifs[:10]:
             print(f"       {statut_porcelaine(l):<9} {l[3:]}")
         info("Elles partiront avec ce commit.")
@@ -4088,7 +4088,7 @@ def importer_local(chemin, dossier, nom=None):
         return chemin, nom
     modifs = fichiers_modifies(chemin)
     if modifs:
-        warn(f"{len(modifs)} fichier(s) sans commit dans cette copie : ils ne font pas partie "
+        warn(f"{len(modifs)} fichier(s), commit manquant, dans cette copie : ils ne font pas partie "
              "de l'import.")
     cible = os.path.join(dossier, "projet")
     code, _, e = git("clone", "--quiet", "--no-hardlinks", chemin, cible, quiet=True)

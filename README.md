@@ -133,7 +133,7 @@ Connexion au compte GitHub de l'entreprise.
    machine. Un repo public s'importe sans connexion.
    - Copie du repo sur la machine : le programme la trouve et propose de
      l'utiliser, sans connexion au compte perso ; seul son dernier commit
-     part, les fichiers sans commit restent.
+     part, les fichiers au commit manquant restent.
    - Repo non public, sans copie sur la machine : connexion au compte GitHub
      perso le temps de l'import.
    - Ouverture : avec accord, le repo devient public le temps du clone, puis
