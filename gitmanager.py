@@ -98,7 +98,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.9.1"
+__version__ = "2.9.2"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -475,8 +475,6 @@ TRADUCTIONS_GIT = (
     (r"^\[(\S+)(?: \(root-commit\))? ([0-9a-f]{7,})\] (.*)$", "commit {2} sur {1} : {3}"),
     (r"^(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?",
      "{1} fichier(s), lignes en plus : {2}, en moins : {3}"),
-    (r"^create mode \d+ (.+)$", "nouveau : {1}"),
-    (r"^delete mode \d+ (.+)$", "retrait : {1}"),
     (r"^rename (.+) \(\d+%\)$", "nouveau nom : {1}"),
     (r"^mode change \d+ => \d+ (.+)$", "mode : {1}"),
     (r"^branch '(.+)' set up to track '(.+)'\.?$", "la branche {1} suit {2}"),
@@ -1202,7 +1200,6 @@ def configurer_identite(cfg, user):
             continue
         valeur = identite_par_defaut(cfg, user, cle) or ask("Email pour les commits")
         ecrire_identite(cfg, cle, valeur)
-        ok(f"git {cle} = {valeur}")
     _, branche, _ = git("config", "--global", "--get", "init.defaultBranch", quiet=True)
     if not branche.strip():
         git("config", "--global", "init.defaultBranch", "main", quiet=True)
@@ -1220,8 +1217,9 @@ def demarrer_session(cfg, methode, tok, user):
 def demander_secret(serveur, avec_utilisateur=False):
     """Jeton (ou mot de passe) saisi sans affichage. Il reste en memoire :
     rien n'est ecrit sur le disque. Retourne (utilisateur, secret)."""
-    info(f"Jeton : le faire sur https://{serveur}/settings/tokens. Il reste dans la")
-    info("session, jamais sur le disque.")
+    info(f"Faire un jeton sur https://{serveur}/settings/tokens : jeton fin, pour les")
+    info("seuls repos utiles, valable peu de temps, jamais dans un fichier.")
+    info("Le jeton reste dans la session, jamais sur le disque.")
     utilisateur = ask("Nom d'utilisateur, Enter pour un jeton GitHub", "",
                       obligatoire=False) if avec_utilisateur else ""
     try:
@@ -1274,7 +1272,7 @@ def ouvrir_session_memoire(cfg, methode, tok):
         return False
     SESSION.update(token=tok, user=user, methode=methode)
     configurer_identite(cfg, user)
-    ok(f"Connexion OK : {user.get('login')}, pour cette session seulement.")
+    ok(f"Connexion OK : {user.get('login')}")
     return True
 
 
@@ -1343,16 +1341,11 @@ def connexion_interactive(cfg, autre_compte=False):
         print("    0. Annuler")
         choix = ask("Choix", "0")
         if choix == "1":
-            warn("Le compte reste sur cette machine pour un temps au choix : cette session,")
-            warn("8 heures, 7 jours, 30 jours ou toujours. Fermer la session peut aussi le")
-            warn("supprimer.")
+            warn("Le compte reste sur cette machine, pour le temps choisi ensuite.")
             if not ask_yn("Continuer ?", True):
                 continue
             connecte = connexion_navigateur(cfg, autre_compte)
         elif choix == "2":
-            warn("Un jeton ouvre le compte tant qu'il existe sur GitHub. Choisir un jeton fin,")
-            warn("pour les seuls repos utiles, valable peu de temps, jamais dans un fichier.")
-            info("Le jeton reste dans la session, jamais sur le disque.")
             connecte = connexion_jeton(cfg)
         elif choix == "3" and code_dispo:
             connecte = connexion_par_code(cfg)
@@ -2007,8 +2000,6 @@ def assurer_identite(cfg, chemin, auto):
             valeur = ask("Nom pour les commits" if cle == "user.name"
                          else "Email pour les commits")
         ecrire_identite(cfg, cle, valeur)
-        if not auto:
-            ok(f"git {cle} = {valeur}")
 
 
 def proteger_fichiers(chemin, auto):
@@ -2195,10 +2186,10 @@ def integrer(cfg, chemin, remote, branche, auto, pour_envoi=False):
     raise Arret("conflit", f"conflit sur {liste} : aucun envoi, le travail local est intact")
 
 
-def pousser(cfg, chemin, remote, branche, auto=False):
+def pousser(cfg, chemin, remote, branche, auto=False, commit_affiche=False):
     """git push (apres integration du serveur). Retourne (statut, detail)."""
     if not auto:
-        info("Lecture du serveur avec git fetch...")
+        info("Lecture du serveur...")
     recuperer(cfg, chemin, remote, auto)
     branche, recus = integrer(cfg, chemin, remote, branche, auto, pour_envoi=True)
     if not a_des_commits(chemin):
@@ -2233,7 +2224,8 @@ def pousser(cfg, chemin, remote, branche, auto=False):
         raise Arret("erreur", expliquer(e))
 
     changements = changements_entre(chemin, avant)
-    if not auto:
+    # commit_affiche : le seul commit envoye vient d'etre montre, sa liste suffit
+    if not auto and not (commit_affiche and a_envoyer == 1 and avant and not recus):
         print()
         info(("Premier envoi" if not avant else "Contenu du push")
              + f" : {bilan_changements(changements)}")
@@ -2241,7 +2233,7 @@ def pousser(cfg, chemin, remote, branche, auto=False):
         if avant:
             info("Les autres fichiers sont pareils. Sur GitHub, chaque fichier montre le")
             info("dernier commit qui le change vraiment : c'est normal.")
-    detail = f"push : {a_envoyer} commit(s), {bilan_changements(changements)}"
+    detail = f"push : {a_envoyer} commit(s)" + (f", {bilan_changements(changements)}" if auto else "")
     if recus:
         detail += f", pull : {recus}"
     return "ok", detail + (f"  ->  {web}" if web else "")
@@ -2280,7 +2272,7 @@ def recuperer_projet(cfg, chemin, auto=False):
     branche, remote = preparer(cfg, chemin, auto, lier=False)
     avant = git("rev-parse", "HEAD", cwd=chemin, quiet=True)[1] if a_des_commits(chemin) else None
     if not auto:
-        info("Lecture du serveur avec git fetch...")
+        info("Lecture du serveur...")
     recuperer(cfg, chemin, remote, auto)
     branche, recus = integrer(cfg, chemin, remote, branche, auto)
     if not recus:
@@ -2289,7 +2281,7 @@ def recuperer_projet(cfg, chemin, auto=False):
     if not auto:
         info(f"Pull : {bilan_changements(changements)}")
         afficher_changements(changements, 25)
-    return "ok", f"pull : {recus} commit(s), {bilan_changements(changements)}"
+    return "ok", f"pull : {recus} commit(s)" + (f", {bilan_changements(changements)}" if auto else "")
 
 
 def synchroniser(cfg, chemin, message=None, envoyer=True):
@@ -2502,8 +2494,8 @@ def voir_modifs(cfg, chemin):
 def act_commit_push(cfg, chemin):
     """Envoyer : commit des fichiers modifies, puis push."""
     branche, remote = preparer(cfg, chemin, auto=False)
-    committer(cfg, chemin)
-    return pousser(cfg, chemin, remote, branche)
+    fait = committer(cfg, chemin)
+    return pousser(cfg, chemin, remote, branche, commit_affiche=fait > 0)
 
 
 def act_pull(cfg, chemin):
@@ -3115,7 +3107,7 @@ def comparer_copies(cfg, d, chemin):
         raise Arret("ignore", "la copie sur cette machine n'a aucun lien avec un repo en ligne")
     branche = d.get("default_branch") or branche_courante(chemin) or "main"
     ici = branche_courante(chemin)
-    info("Lecture de la copie en ligne avec git fetch...")
+    info("Lecture de la copie en ligne...")
     recuperer(cfg, chemin, remote, auto=False)
     ref = f"{remote}/{branche}"
     if not ref_existe(chemin, f"refs/remotes/{ref}"):
@@ -3472,7 +3464,7 @@ def act_compte(cfg):
         warn(f"Aucune session sur {host(cfg)}.")
     cles = cles_enregistrees(cfg)
     if cles:
-        info(f"Compte sur cette machine, par {NOMS_METHODES[cles]}, {texte_garde(cfg) or 'toujours'}.")
+        info(f"Identifiants sur cette machine : {texte_garde(cfg) or 'toujours'}.")
     print()
     if user:
         actions = [("Changer de moyen de connexion", changer_moyen),
@@ -3964,8 +3956,8 @@ def envoyer_vers_entreprise(cfg, source):
     if not remplacer_contenu(source, copie, supprimer=mode == "2"):
         return "ignore", "abandon : aucun changement dans le repo de l'entreprise"
     print()
-    committer(cfg, copie, proposer_gitignore=False)
-    statut, detail = pousser(cfg, copie, remote, branche)
+    fait = committer(cfg, copie, proposer_gitignore=False)
+    statut, detail = pousser(cfg, copie, remote, branche, commit_affiche=fait > 0)
     info(f"La copie locale reste sur le Bureau : {copie}")
     return statut, detail
 
@@ -4194,8 +4186,7 @@ def menu_repos(cfg, nom_menu):
         ligne_compte(cfg)
         cles = cles_enregistrees(cfg)
         if cles:
-            print(c(f"  Identifiants sur cette machine, par {NOMS_METHODES[cles]}, "
-                    f"{texte_garde(cfg) or 'toujours'}", "36"))
+            print(c(f"  Identifiants sur cette machine : {texte_garde(cfg) or 'toujours'}", "36"))
         identifiants = bool(traces_compte(cfg))
         print()
         print("    1. Repos GitHub en ligne")
