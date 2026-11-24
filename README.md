@@ -94,6 +94,9 @@ Connexion au compte GitHub perso.
    - Envoyer : commit et push.
    - Mettre à jour : pull.
    - Écraser : force push, GitHub prend le contenu du dossier.
+   - Ouvrir la copie sur cette machine : le dossier dans le gestionnaire de
+     fichiers du système.
+   - Ouvrir la copie en ligne : la page du repo dans le navigateur.
    - Voir les modifications, rendre public ou privé, relier à un autre
      repo, supprimer le `.git`.
    - Tous les repos d'un dossier : push ou pull de chacun, en une fois.

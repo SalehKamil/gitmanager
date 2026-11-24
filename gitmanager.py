@@ -33,7 +33,8 @@ menu principal. Les deux comptes restent separes.
        copie sur cette machine dans un tableau a deux colonnes, puis les
        deux versions d'un fichier cote a cote, voir les acces, supprimer.
      - Repos GitHub en local : envoyer, c'est-a-dire commit + push ; mettre
-       a jour par pull ; ecraser par force push ; push ou pull de tous les
+       a jour par pull ; ecraser par force push ; ouvrir la copie sur cette
+       machine ou en ligne, dans le navigateur ; push ou pull de tous les
        repos d'un dossier ; sans repo local, envoi d'un dossier sur GitHub
        avec nom, description et visibilite.
      - Compte GitHub : moyen de connexion, compte, serveur, permissions,
@@ -98,7 +99,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.4.1"
+__version__ = "2.5.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -2275,7 +2276,7 @@ def menu_projet(cfg, chemin):
         warn("Serveur injoignable : l'etat 'a envoyer / a recuperer' peut etre ancien.")
     actions = {
         "1": act_commit_push, "2": act_pull, "3": act_ecraser, "4": voir_modifs,
-        "5": act_visibilite_projet, "6": act_relier,
+        "7": act_visibilite_projet, "8": act_relier,
     }
     while True:
         titre("Repo local")
@@ -2286,12 +2287,22 @@ def menu_projet(cfg, chemin):
         print("    2. Mettre a jour : pull")
         print("    3. Ecraser GitHub avec ce dossier : force push")
         print("    4. Voir les modifications")
-        print("    5. Rendre le repo public / prive")
-        print("    6. " + ("Relier a un autre repo GitHub" if relie else "Relier a GitHub"))
-        print("    7. Supprimer le .git de ce dossier")
+        print("    5. Ouvrir la copie sur cette machine")
+        print("    6. Ouvrir la copie en ligne")
+        print("    7. Rendre le repo public / prive")
+        print("    8. " + ("Relier a un autre repo GitHub" if relie else "Relier a GitHub"))
+        print("    9. Supprimer le .git de ce dossier")
         print("    0. Retour")
         choix = ask("Choix", "0")
-        if choix == "7":
+        if choix == "5":
+            print()
+            ouvrir_explorateur(chemin)
+            continue
+        if choix == "6":
+            print()
+            ouvrir_en_ligne(chemin)
+            continue
+        if choix == "9":
             if act_supprimer_git(cfg, chemin):
                 pause()
                 return
@@ -2491,6 +2502,30 @@ def act_depots(cfg):
             filtre = choix
 
 
+def ouvrir_navigateur(url):
+    """Ouvre la page dans le navigateur et affiche son adresse, utile sans
+    navigateur ou sur un poste distant."""
+    info(f"Ouverture dans le navigateur : {url}")
+    try:
+        if not webbrowser.open(url):
+            warn("Aucun navigateur disponible : copier l'adresse ci-dessus.")
+    except webbrowser.Error:
+        warn("Aucun navigateur disponible : copier l'adresse ci-dessus.")
+
+
+def ouvrir_en_ligne(chemin):
+    """Page GitHub du repo auquel ce dossier est relie."""
+    remote = remote_principal(chemin)
+    if not remote:
+        warn("Ce dossier n'est relie a aucun repo en ligne : le relier avec le choix 8.")
+        return
+    url = url_web(url_remote(remote, chemin))
+    if not url:
+        warn(f"Adresse du repo en ligne non reconnue : {url_remote(remote, chemin)}")
+        return
+    ouvrir_navigateur(url)
+
+
 def ouvrir_explorateur(chemin):
     """Ouvre le dossier dans le gestionnaire de fichiers du systeme (Explorateur
     sous Windows, Finder sous macOS, celui du bureau sous Linux), sans bloquer."""
@@ -2554,7 +2589,8 @@ def menu_depot(cfg, d, locaux):
                 ouvrir_explorateur(local)
                 menu_projet(cfg, local)
         elif choix == "5":
-            webbrowser.open(d["html_url"])
+            print()
+            ouvrir_navigateur(d["html_url"])
         elif choix == "6":
             if not local:
                 warn("Aucune copie sur cette machine : la cloner avec le choix 4.")
