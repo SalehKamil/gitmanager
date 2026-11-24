@@ -30,7 +30,8 @@ menu principal. Les deux comptes restent separes.
      - Repos GitHub en ligne : recherche par nom, fichiers, commits, public
        / prive, ouvrir la copie sur cette machine ou cloner le projet en
        local, ouvrir la copie en ligne, comparer la copie en ligne et la
-       copie sur cette machine, voir les acces, supprimer.
+       copie sur cette machine dans un tableau a deux colonnes, puis les
+       deux versions d'un fichier cote a cote, voir les acces, supprimer.
      - Repos GitHub en local : envoyer, c'est-a-dire commit + push ; mettre
        a jour par pull ; ecraser par force push ; push ou pull de tous les
        repos d'un dossier ; sans repo local, envoi d'un dossier sur GitHub
@@ -75,6 +76,7 @@ si Git ecrit des identifiants en clair.
 """
 
 import base64
+import difflib
 import filecmp
 import getpass
 import hashlib
@@ -96,7 +98,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -2571,10 +2573,6 @@ def menu_depot(cfg, d, locaux):
             return None
 
 
-ETATS_ECART = {"M": "different", "T": "different", "A": "sur cette machine seulement",
-               "D": "en ligne seulement"}
-
-
 def lignes_texte(fichier, maxi=2_000_000):
     """Lignes d'un fichier texte, ou None pour un binaire, un lien ou un trop gros fichier."""
     try:
@@ -2589,106 +2587,288 @@ def lignes_texte(fichier, maxi=2_000_000):
     return data.decode("utf-8", errors="replace").splitlines()
 
 
+def largeur_terminal():
+    return max(80, min(160, shutil.get_terminal_size((100, 24)).columns))
+
+
+def couper(texte, largeur):
+    texte = str(texte)
+    return texte if len(texte) <= largeur else texte[:max(largeur - 1, 0)] + "~"
+
+
+def tableau(entetes, lignes, couleurs=None):
+    """Tableau aligne : premiere colonne pour le parametre, puis les colonnes
+    de valeurs. couleurs : {(ligne, colonne): code} pour mettre une case en avant."""
+    couleurs = couleurs or {}
+    total = largeur_terminal() - 4
+    larg = [max(len(str(l[i])) for l in [entetes] + lignes) for i in range(len(entetes))]
+    larg[0] = min(larg[0], 32)
+    while sum(larg) + 2 * (len(larg) - 1) > total and max(larg) > 8:
+        larg[larg.index(max(larg))] -= 1  # la colonne la plus large cede la place
+    def rangee(cases, n=None):
+        morceaux = []
+        for i, case in enumerate(cases):
+            texte = couper(case, larg[i]).ljust(larg[i])
+            code = couleurs.get((n, i))
+            morceaux.append(c(texte, code) if code and n is not None else texte)
+        return "    " + "  ".join(morceaux).rstrip()
+    print(c(rangee(entetes), "1"))
+    print(c("    " + "  ".join("-" * l for l in larg), "90"))
+    for n, l in enumerate(lignes):
+        print(rangee(l, n))
+
+
+def infos_commit(chemin, ref):
+    """Dernier commit de ref : dict avec court, date, epoch, auteur, message."""
+    code, out, _ = git("log", "-1", "--format=%h%x1f%ct%x1f%cd%x1f%an%x1f%s",
+                       "--date=format:%Y-%m-%d %H:%M", ref, cwd=chemin, quiet=True)
+    if code != 0 or not out:
+        return None
+    court, epoch, date_c, auteur, message = (out.split("\x1f") + [""] * 5)[:5]
+    return {"court": court, "epoch": int(epoch or 0), "date": date_c, "auteur": auteur,
+            "message": message}
+
+
+def fichiers_en_ligne(chemin, ref):
+    """{fichier: taille} des fichiers de ref."""
+    _, out, _ = git("ls-tree", "-r", "-l", "-z", ref, cwd=chemin, quiet=True)
+    fichiers = {}
+    for rec in out.split("\0"):
+        meta, _, nom = rec.partition("\t")
+        parts = meta.split()
+        if nom and len(parts) == 4 and parts[1] == "blob":
+            fichiers[nom] = int(parts[3]) if parts[3].isdigit() else 0
+    return fichiers
+
+
+def fichiers_en_local(chemin):
+    """{fichier: taille} des fichiers du dossier, suivis par Git ou nouveaux,
+    sans les fichiers ignores."""
+    _, out, _ = git("ls-files", "--cached", "--others", "--exclude-standard", "-z",
+                    cwd=chemin, quiet=True)
+    fichiers = {}
+    for nom in (f for f in out.split("\0") if f):
+        try:
+            fichiers[nom] = os.lstat(os.path.join(chemin, nom)).st_size
+        except OSError:
+            pass
+    return fichiers
+
+
+def etats_locaux(chemin):
+    """{fichier: code XY de git status} des fichiers modifies sans commit."""
+    _, out, _ = git("status", "--porcelain", "-z", cwd=chemin, quiet=True)
+    etats = {}
+    for rec in (r for r in out.split("\0") if len(r) > 3):
+        etats[rec[3:]] = rec[:2]
+    return etats
+
+
 def ecarts_fichiers(chemin, ref):
-    """Fichiers qui different entre ref et le dossier, fichiers non commites
-    compris : liste de (etat, fichier, lignes ajoutees, lignes retirees, suivi)."""
-    _, ns, _ = git("diff", "--no-renames", "--name-status", "-z", ref, "--", cwd=chemin, quiet=True)
-    _, num, _ = git("diff", "--no-renames", "--numstat", "-z", ref, "--", cwd=chemin, quiet=True)
-    lignes = {}
-    for rec in num.split("\0"):
-        parts = rec.split("\t", 2)
-        if len(parts) == 3:
-            lignes[parts[2]] = (parts[0], parts[1])
-    morceaux = [m for m in ns.split("\0") if m]
-    ecarts = []
-    for etat, fichier in zip(morceaux[0::2], morceaux[1::2]):
-        plus, moins = lignes.get(fichier, ("", ""))
-        ecarts.append((ETATS_ECART.get(etat[:1], etat), fichier, plus, moins, True))
+    """Fichiers dont le contenu differe entre ref et le dossier, fichiers sans
+    commit compris : liste de (fichier, present en ligne, present en local)."""
+    _, ns, _ = git("diff", "--no-renames", "--name-only", "-z", ref, "--", cwd=chemin, quiet=True)
     _, autres, _ = git("ls-files", "--others", "--exclude-standard", "-z", cwd=chemin, quiet=True)
-    for fichier in (f for f in autres.split("\0") if f):
-        texte = lignes_texte(os.path.join(chemin, fichier))
-        ecarts.append((ETATS_ECART["A"], fichier, "" if texte is None else str(len(texte)), "0", False))
-    return sorted(ecarts, key=lambda e: e[1].lower())
+    noms = {f for f in ns.split("\0") if f} | {f for f in autres.split("\0") if f}
+    en_ligne = fichiers_en_ligne(chemin, ref)
+    return sorted(((f, f in en_ligne, os.path.lexists(os.path.join(chemin, f))) for f in noms),
+                  key=lambda e: e[0].lower())
+
+
+def contenu_en_ligne(chemin, ref, fichier):
+    """Lignes du fichier dans ref, ou None pour un binaire."""
+    code, out, _ = git("show", f"{ref}:{fichier}", cwd=chemin, quiet=True)
+    if code != 0 or "\0" in out:
+        return None
+    return out.splitlines()
+
+
+def date_fichier(chemin, ref, fichier):
+    """Date du dernier commit qui a touche ce fichier dans ref : (texte, epoch)."""
+    _, out, _ = git("log", "-1", "--format=%ct %cd", "--date=format:%Y-%m-%d %H:%M", ref, "--",
+                    fichier, cwd=chemin, quiet=True)
+    epoch, _, texte = out.strip().partition(" ")
+    return texte, int(epoch) if epoch.isdigit() else 0
+
+
+def case_fichier(nb_lignes, taille_octets, date_texte, etat=""):
+    debut = "binaire, " + taille(taille_octets) if nb_lignes is None else \
+        f"{nb_lignes} ligne{'s' if nb_lignes > 1 else ''}"
+    return ", ".join(x for x in (debut, date_texte, etat) if x)
+
+
+def cote_a_cote(gauche, droite, titre_gauche, titre_droite, contexte=3, maxi=400):
+    """Les deux versions d'un fichier cote a cote, en ligne a gauche et en local
+    a droite. Les lignes differentes sont en jaune ; une case vide signifie que
+    la ligne n'existe pas de ce cote."""
+    col = (largeur_terminal() - 4 - 3 - 2 * 6) // 2
+    def case(num, texte):
+        if num is None:
+            return " " * (6 + col)
+        texte = couper(texte.expandtabs(4).replace("\r", ""), col)
+        return c(f"{num:>5} ", "90") + texte.ljust(col)
+    def jaune(num, texte):
+        if num is None:
+            return " " * (6 + col)
+        texte = couper(texte.expandtabs(4).replace("\r", ""), col)
+        return c(f"{num:>5} ", "90") + c(texte.ljust(col), "1;33")
+    print(c(f"    {'':6}{'En ligne':<{col}} | {'':6}En local", "1"))
+    print(c(f"    {'':6}{couper(titre_gauche, col):<{col}} | {'':6}{couper(titre_droite, col)}", "90"))
+    print(c(f"    {'-' * (6 + col)}-+-{'-' * (6 + col)}", "90"))
+    groupes = list(difflib.SequenceMatcher(None, gauche, droite, autojunk=False)
+                   .get_grouped_opcodes(contexte))
+    if not groupes:
+        info("Contenu identique.")
+        return
+    affichees = 0
+    for g, groupe in enumerate(groupes):
+        if g:
+            print(c(f"    {'...':>5}{' ' * (col + 1)} | {'...':>5}", "90"))
+        for tag, i1, i2, j1, j2 in groupe:
+            for k in range(max(i2 - i1, j2 - j1)):
+                i = i1 + k if i1 + k < i2 else None
+                j = j1 + k if j1 + k < j2 else None
+                fmt = case if tag == "equal" else jaune
+                print("    " + fmt(None if i is None else i + 1, gauche[i] if i is not None else "")
+                      + c(" | ", "90")
+                      + fmt(None if j is None else j + 1, droite[j] if j is not None else ""))
+                affichees += 1
+                if affichees >= maxi:
+                    info(f"Affichage arrete apres {maxi} lignes.")
+                    return
 
 
 def comparer_copies(cfg, d, chemin):
-    """Ce qui differe entre la copie en ligne, sur sa branche principale, et la
-    copie sur cette machine, fichiers non commites compris. Retourne "retour"
-    quand Entree ramene a l'ecran du repo."""
+    """Tableau de comparaison entre la copie en ligne, sur sa branche
+    principale, et la copie sur cette machine, puis les fichiers differents et
+    leurs deux versions cote a cote. Retourne "retour" quand Entree ramene a
+    l'ecran du repo."""
     titre("Comparer la copie en ligne et la copie sur cette machine")
     remote = remote_principal(chemin)
     if not remote:
         raise Arret("ignore", "la copie sur cette machine n'est reliee a aucun repo en ligne")
     branche = d.get("default_branch") or branche_courante(chemin) or "main"
     ici = branche_courante(chemin)
-    info(f"Copie en ligne : {d['html_url']}, branche {branche}")
-    info(f"Copie sur cette machine : {chemin}, branche {ici or '-'}")
-    if ici and ici != branche:
-        warn(f"Cette machine est sur la branche {ici} : comparaison avec la branche {branche} en ligne.")
     info("Lecture de la copie en ligne avec git fetch...")
     recuperer(cfg, chemin, remote, auto=False)
     ref = f"{remote}/{branche}"
     if not ref_existe(chemin, f"refs/remotes/{ref}"):
         raise Arret("ignore", f"la branche {branche} n'existe pas encore en ligne")
-    nb_ecarts = 0
-    if a_des_commits(chemin):
-        for plage, libelle in ((f"HEAD..{ref}", "Commits en ligne, absents de cette machine"),
-                               (f"{ref}..HEAD", "Commits sur cette machine, pas encore envoyes")):
-            n = nb_commits(chemin, plage)
-            nb_ecarts += n
-            print()
-            info(f"{libelle} : {n}")
-            if n:
-                _, log, _ = git("log", "--format=%h  %ad  %s", "--date=short", "-10", plage,
-                                cwd=chemin, quiet=True)
-                for l in log.splitlines():
-                    print("       " + l)
-                if n > 10:
-                    print(f"       ... et {n - 10} autre(s)")
+    ligne_c = infos_commit(chemin, ref)
+    local_c = infos_commit(chemin, "HEAD") if a_des_commits(chemin) else None
+    f_ligne, f_local = fichiers_en_ligne(chemin, ref), fichiers_en_local(chemin)
+    etats = etats_locaux(chemin)
+    seulement_ligne = nb_commits(chemin, f"HEAD..{ref}") if local_c else nb_commits(chemin, ref)
+    seulement_local = nb_commits(chemin, f"{ref}..HEAD") if local_c else 0
+    vide = {"court": "-", "date": "-", "auteur": "-", "message": "aucun commit", "epoch": 0}
+    lc, ll = ligne_c or vide, local_c or vide
+    lignes = [
+        ["Branche", branche, ici or "-"],
+        ["Dernier commit", lc["court"], ll["court"]],
+        ["Message", lc["message"], ll["message"]],
+        ["Date du dernier commit", lc["date"], ll["date"]],
+        ["Auteur", lc["auteur"], ll["auteur"]],
+        ["Copie la plus recente", "-", "-"],
+        ["Commits", nb_commits(chemin, ref), nb_commits(chemin, "HEAD") if local_c else 0],
+        ["Commits en avance", seulement_ligne, seulement_local],
+        ["Fichiers", len(f_ligne), len(f_local)],
+        ["Taille", taille(sum(f_ligne.values())), taille(sum(f_local.values()))],
+        ["Fichiers sans commit", "-", len(etats)],
+    ]
+    couleurs = {}
+    if lc["court"] != ll["court"] and lc["epoch"] != ll["epoch"]:
+        plus_recent = 1 if lc["epoch"] > ll["epoch"] else 2
+        lignes[5][plus_recent] = "oui"
+        couleurs[(3, plus_recent)] = couleurs[(5, plus_recent)] = "1;32"
+    for n in (7, 10):
+        for col in (1, 2):
+            if str(lignes[n][col]) not in ("0", "-"):
+                couleurs[(n, col)] = "33"
     print()
-    info(f"Fichiers modifies sur cette machine, sans commit : {len(fichiers_modifies(chemin))}")
+    tableau(["", "En ligne", "En local"], lignes, couleurs)
     ecarts = ecarts_fichiers(chemin, ref)
-    if not ecarts:
-        print()
-        if nb_ecarts:
-            ok("Les fichiers sont identiques dans les deux copies, seuls les commits different.")
-        else:
-            ok("Les deux copies sont identiques.")
+    print()
+    if not ecarts and not seulement_ligne and not seulement_local:
+        ok("Les deux copies sont identiques.")
         return None
+    if seulement_ligne:
+        info(f"En ligne : {seulement_ligne} commit(s) en avance, a recuperer avec Mettre a jour, pull.")
+    if seulement_local:
+        info(f"En local : {seulement_local} commit(s) en avance, a envoyer avec Envoyer, commit + push.")
+    if etats:
+        info(f"En local : {len(etats)} fichier(s) modifie(s) sans commit.")
+    if not ecarts:
+        ok("Les fichiers sont identiques dans les deux copies, seuls les commits different.")
+        return None
+    brut, recents = [], {}
+    for n, (fichier, present_ligne, present_local) in enumerate(ecarts):
+        quand_ligne = quand_local = 0
+        if present_ligne:
+            texte = contenu_en_ligne(chemin, ref, fichier)
+            date_texte, quand_ligne = date_fichier(chemin, ref, fichier)
+            d_ligne = (None if texte is None else len(texte), f_ligne.get(fichier), date_texte, "")
+        else:
+            d_ligne = "absent"
+        xy = etats.get(fichier, "")
+        if present_local:
+            texte = lignes_texte(os.path.join(chemin, fichier))
+            if xy:
+                quand_local = int(os.lstat(os.path.join(chemin, fichier)).st_mtime)
+                date_texte = datetime.fromtimestamp(quand_local).strftime("%Y-%m-%d %H:%M")
+                etat = "nouveau, sans commit" if xy == "??" else "sans commit"
+            else:
+                (date_texte, quand_local), etat = date_fichier(chemin, "HEAD", fichier), ""
+            d_local = (None if texte is None else len(texte), f_local.get(fichier), date_texte, etat)
+        else:
+            d_local = "supprime, sans commit" if "D" in xy else "absent"
+        if quand_ligne and quand_local and quand_ligne != quand_local:
+            recents[(n, 1 if quand_ligne > quand_local else 2)] = "32"
+        brut.append((fichier, d_ligne, d_local))
+    def cases_fichiers(heure):
+        def case(dn):
+            if isinstance(dn, str):
+                return dn
+            nb, t, quand, etat = dn
+            return case_fichier(nb, t, quand if heure else quand[:10], etat)
+        return [[f, case(a), case(b)] for f, a, b in brut]
+    cases = cases_fichiers(True)
+    larg = [max(len(f"{len(cases)}. ") + len(cs[0]) for cs in cases)] + \
+        [max(len(cs[i]) for cs in cases) for i in (1, 2)]
+    if sum(larg) + 4 > largeur_terminal() - 4:
+        cases = cases_fichiers(False)  # dates sans l'heure pour tenir dans le terminal
     while True:
         print()
         info(f"Fichiers differents entre les deux copies : {len(ecarts)}")
-        print(c("       + : lignes sur cette machine seulement, - : lignes en ligne seulement", "90"))
-        for i, (etat, fichier, plus, moins, _) in enumerate(ecarts[:200], 1):
-            if plus == "-":
-                lignes = "binaire"
-            else:
-                lignes = " ".join(x for x in (f"+{plus}" if plus not in ("", "0") else "",
-                                              f"-{moins}" if moins not in ("", "0") else "") if x)
-            print(f"    {i:>3}. {etat:<28} {fichier[:40]:<40} {lignes}")
-        if len(ecarts) > 200:
-            print(f"         ... et {len(ecarts) - 200} autre(s)")
         print()
-        choix = ask("Numero d'un fichier pour voir le detail ligne par ligne, Entree pour revenir",
+        tableau(["Fichier", "En ligne", "En local"],
+                [[f"{i}. {f}", a, b] for i, (f, a, b) in enumerate(cases[:200], 1)],
+                {**recents, **{(n, col): "90" for n, cs in enumerate(cases[:200])
+                               for col in (1, 2) if cs[col] == "absent"}})
+        print(c("    En vert : la version la plus recente du fichier.", "90"))
+        if len(cases) > 200:
+            print(f"         ... et {len(cases) - 200} autre(s)")
+        print()
+        choix = ask("Numero d'un fichier pour voir ses deux versions cote a cote, Entree pour revenir",
                     "", obligatoire=False)
         if not choix:
             return "retour"
-        if not (choix.isdigit() and 1 <= int(choix) <= min(len(ecarts), 200)):
+        if not (choix.isdigit() and 1 <= int(choix) <= min(len(cases), 200)):
             warn("Choix invalide.")
             continue
-        etat, fichier, _, _, suivi = ecarts[int(choix) - 1]
+        fichier, c_ligne, c_local = cases[int(choix) - 1]
+        present_ligne, present_local = ecarts[int(choix) - 1][1:]
+        gauche = contenu_en_ligne(chemin, ref, fichier) if present_ligne else []
+        droite = lignes_texte(os.path.join(chemin, fichier)) if present_local else []
         print()
-        if not suivi:
-            info(f"{fichier} : nouveau fichier sur cette machine, pas encore dans un commit.")
-            texte = lignes_texte(os.path.join(chemin, fichier))
-            if texte is None:
-                info("Contenu non affichable : fichier binaire, lien ou trop gros.")
-            for ligne in (texte or [])[:200]:
-                print(c("+" + ligne, "32"))
-            if texte and len(texte) > 200:
-                print(f"       ... et {len(texte) - 200} autre(s) ligne(s)")
+        print(c(f"  {fichier}", "1;36"))
+        if gauche is None or droite is None:
+            info("Fichier binaire : comparaison ligne par ligne impossible.")
+            info(f"En ligne : {c_ligne}")
+            info(f"En local : {c_local}")
         else:
-            git_direct("--no-pager", "diff", "--no-renames", ref, "--", fichier, cwd=chemin)
+            info("En jaune : lignes differentes. Case vide : la ligne n'existe pas de ce cote.")
+            print()
+            cote_a_cote(gauche, droite, c_ligne, c_local)
         pause()
 
 

@@ -81,9 +81,11 @@ Connexion au compte GitHub perso.
      gestionnaire de fichiers du système et son menu dans le terminal.
    - Cloner le projet en local, quand aucune copie n'existe.
    - Ouvrir la copie en ligne : la page du repo dans le navigateur.
-   - Comparer la copie en ligne et la copie sur cette machine : les commits
-     absents de chaque côté, les fichiers différents, puis le détail ligne
-     par ligne d'un fichier.
+   - Comparer la copie en ligne et la copie sur cette machine : un tableau à
+     deux colonnes, en ligne et en local, avec la date du dernier commit, la
+     copie la plus récente, les commits en avance, les fichiers et leur
+     taille ; puis les fichiers différents, avec la version la plus récente
+     en vert ; puis les deux versions d'un fichier côte à côte.
    - Voir les accès à ce repo : le rôle du compte et ses droits.
    - Supprimer.
    - C : changer de compte.
