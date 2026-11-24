@@ -48,11 +48,13 @@ separes. Les textes du programme evitent les mots qui prennent un accent.
        par une copie du repo de l'entreprise sur le Bureau, qui reste.
      - Repos GitHub de l'entreprise : les choix de l'option 1.
 
-  3. Se connecter ; avec une session ouverte : Changer de moyen de connexion.
-  4. Fermer la session, avec une session ouverte, puis garder le compte sur
-     cette machine ou le supprimer sans trace : connexion enregistree,
-     identifiants en clair, nom et email des commits, reglages du compte.
-  Supprimer le compte de cette machine : pour un compte garde sans session.
+  3. Se connecter, pour un compte sans session.
+
+Les identifiants se gerent dans les menus des repos GitHub, perso ou de
+l'entreprise, avec une session ouverte : Fermer la session, puis garder le
+compte sur cette machine ou le supprimer sans trace ; Supprimer les
+identifiants de cette machine, quand il y en a. Le menu principal n'en parle
+pas.
 
 Connexion : 1. Se connecter sur le navigateur, avec GitHub CLI ou Git
 Credential Manager : le compte reste sur cette machine pour un temps au
@@ -96,7 +98,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.8.1"
+__version__ = "2.9.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -1725,6 +1727,25 @@ def supprimer_compte(cfg, login=None, silencieux=False):
         info("Sur GitHub, les autorisations restent visibles ici, pour les retirer :")
         info(f"https://{h}/settings/applications et https://{h}/settings/tokens")
     return not restes
+
+
+def act_supprimer_identifiants(cfg):
+    """Session ouverte : supprime les identifiants du compte de cette machine,
+    sans trace, et ferme la session."""
+    login = (SESSION["user"] or {}).get("login") or cfg.get(cle("login"))
+    traces = traces_compte(cfg)
+    print()
+    info(f"Sur cette machine, pour le compte GitHub {nom_compte()} {login or ''} :")
+    for t in traces:
+        print(f"       - {t}")
+    if not ask_yn("Supprimer ces identifiants, sans trace ? La session se ferme aussi.", False):
+        info("Abandon.")
+        return
+    SESSION.update(token="", user=None, methode=None)
+    NAVIGATION["menu_principal"] = True
+    print()
+    ok(f"Fin de session : compte GitHub {nom_compte()}.")
+    supprimer_compte(cfg, login)
 
 
 def act_supprimer_compte(cfg):
@@ -3465,7 +3486,7 @@ def act_compte(cfg):
         actions = [("Se connecter", connexion_interactive),
                    ("Changer de serveur GitHub Entreprise", changer_serveur)]
         if traces_compte(cfg):
-            actions.append(("Supprimer le compte de cette machine", act_supprimer_compte))
+            actions.append(("Supprimer les identifiants de cette machine", act_supprimer_compte))
     fn = menu_numerote(actions)
     if fn:
         fn(cfg)
@@ -4115,22 +4136,15 @@ def pour_un_compte(noms, action, fn):
 
 
 def actions_principales(cfg):
-    """Choix du menu principal sous les deux options. Se deconnecter apparait
-    seulement pour un compte connecte ; sans compte connecte, Se connecter."""
+    """Choix du menu principal sous les deux options : Se connecter, pour un compte
+    sans session. Les identifiants se gerent dans les menus des repos GitHub."""
     connectes = [n for n in PROFILS if PROFILS[n]["user"]]
-    enregistres = [n for n in PROFILS if n not in connectes and traces_compte(cfg, n)]
-    if not connectes:
-        actions = [("Se connecter", pour_un_compte(list(PROFILS), "Se connecter",
-                                                    lambda cfg: assurer_connexion(cfg)))]
-    else:
-        actions = [("Changer de moyen de connexion",
-                    pour_un_compte(connectes, "Changer de moyen de connexion", changer_moyen)),
-                   ("Fermer la session", pour_un_compte(connectes, "Fermer la session", deconnexion))]
-    if enregistres:
-        actions.append(("Supprimer le compte de cette machine",
-                        pour_un_compte(enregistres, "Supprimer le compte",
-                                       act_supprimer_compte)))
-    return actions, connectes, enregistres
+    libres = [n for n in PROFILS if n not in connectes]
+    actions = []
+    if libres:
+        actions.append(("Se connecter", pour_un_compte(libres, "Se connecter",
+                                                        lambda cfg: assurer_connexion(cfg))))
+    return actions, connectes
 
 
 def choisir_fonction(cfg):
@@ -4138,17 +4152,9 @@ def choisir_fonction(cfg):
     while True:
         verifier_gardes(cfg)
         titre("MENU PRINCIPAL")
-        actions, connectes, enregistres = actions_principales(cfg)
-        for nom in PROFILS:
-            if nom in connectes:
-                etat = PROFILS[nom]["user"].get("login")
-                if cles_enregistrees(cfg, nom):
-                    etat += ", compte sur cette machine " + (texte_garde(cfg, nom) or "toujours")
-            elif nom in enregistres:
-                etat = "pas de session, traces sur cette machine"
-            else:
-                continue
-            print(c(f"  Compte GitHub {nom_compte(nom)} : {etat}", "36"))
+        actions, connectes = actions_principales(cfg)
+        for nom in connectes:
+            print(c(f"  Compte GitHub {nom_compte(nom)} : {PROFILS[nom]['user'].get('login')}", "36"))
         print()
         print("    1. Repos GitHub perso")
         print("    2. Entreprise : import et repos GitHub de l'entreprise")
@@ -4186,14 +4192,28 @@ def menu_repos(cfg, nom_menu):
             return
         titre(nom_menu)
         ligne_compte(cfg)
+        cles = cles_enregistrees(cfg)
+        if cles:
+            print(c(f"  Identifiants sur cette machine, par {NOMS_METHODES[cles]}, "
+                    f"{texte_garde(cfg) or 'toujours'}", "36"))
+        identifiants = bool(traces_compte(cfg))
         print()
         print("    1. Repos GitHub en ligne")
         print("    2. Repos GitHub en local")
         print("    3. Compte GitHub")
+        print("    4. Fermer la session")
+        if identifiants:
+            print("    5. Supprimer les identifiants de cette machine")
         print("    0. Retour")
         choix = ask("Choix", "0")
         if choix in ("0", "q", "quit", "exit"):
             return
+        if choix == "4":
+            lancer(deconnexion, cfg)
+            continue
+        if choix == "5" and identifiants:
+            lancer(act_supprimer_identifiants, cfg)
+            continue
         fn = {"1": act_depots, "2": act_depots_locaux, "3": act_compte}.get(choix)
         if fn:
             lancer(fn, cfg, avec_pause=choix == "3")
@@ -4239,8 +4259,7 @@ def main():
     for nom in PROFILS:  # comptes de cette machine : session ouverte au demarrage
         activer_profil(nom)
         if cles_enregistrees(cfg) and connexion_enregistree(cfg):
-            ok(f"Session ouverte : compte GitHub {nom_compte()} {SESSION['user'].get('login')},"
-               " compte de cette machine.")
+            ok(f"Session ouverte : compte GitHub {nom_compte()} {SESSION['user'].get('login')}.")
     activer_profil("perso")
     try:
         while True:

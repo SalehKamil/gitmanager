@@ -59,17 +59,11 @@ nouvel essai, sans nouvelle connexion.
 
 Le menu principal propose aussi, sous les deux options :
 
-3. Se connecter : au compte perso ou à celui de l'entreprise. Avec une
-   session ouverte, ce choix devient Changer de moyen de connexion.
-4. Fermer la session : seulement avec une session ouverte. Le programme
-   demande ensuite quoi faire du compte sur la machine.
-   - Garder le compte : la prochaine connexion par le navigateur le
-     réutilise.
-   - Supprimer le compte, sans trace : connexion enregistrée, identifiants en
-     clair, nom et email des commits et réglages du compte sont effacés.
+3. Se connecter : au compte perso ou à celui de l'entreprise, pour un compte
+   sans session.
 
-Un compte gardé sur la machine, sans session ouverte, se supprime avec le
-choix Supprimer le compte de cette machine.
+Les identifiants gardés sur la machine se gèrent seulement dans les menus des
+repos GitHub, perso ou de l'entreprise, avec une session ouverte.
 
 Chaque commande Git qui change un repo s'affiche, avec son résultat en
 français : `git add`, `git commit`, `git push`, `git pull` et les autres. Tout
@@ -117,6 +111,15 @@ Connexion au compte GitHub perso.
 3. Compte GitHub : changer de moyen de connexion, changer de compte,
    changer de serveur, voir les permissions de la connexion, temps de garde
    du compte sur la machine, fermer la session.
+4. Fermer la session : le programme demande ensuite quoi faire du compte sur
+   la machine.
+   - Garder le compte : la prochaine connexion par le navigateur le
+     réutilise.
+   - Supprimer le compte, sans trace : connexion enregistrée, identifiants en
+     clair, nom et email des commits et réglages du compte sont effacés.
+5. Supprimer les identifiants de cette machine : seulement quand des
+   identifiants y sont gardés ; tout est effacé sans trace et la session se
+   ferme.
 
 ### Option 2 : entreprise
 
