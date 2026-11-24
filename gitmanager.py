@@ -34,8 +34,11 @@ separes. Les textes du programme evitent les mots qui prennent un accent.
        deux colonnes puis les deux versions d'un fichier, voir les droits,
        supprimer ; C pour changer de compte, D pour fermer la session.
      - Repos GitHub en local : Envoyer, commit + push avec le message du
-       commit au choix ; Recevoir, pull ; Remplacer GitHub par ce dossier,
-       force push ; ouvrir la copie sur cette machine ou en ligne ; push ou
+       commit au choix ; Recevoir, pull ; voir les changements, avec les
+       deux versions d'un fichier ; comparer en ligne et en local ;
+       branches ; annuler un commit ou des changements ; ouvrir la copie
+       sur cette machine ou en ligne ; Plus de choix : force push, git
+       stash, public ou non public, lien, suppression du .git ; push ou
        pull de tous les repos d'un dossier ; envoi d'un dossier sur GitHub ;
        dossier sans git : lien avec son repo en ligne, puis pull.
      - Compte GitHub : moyen de connexion, compte, serveur, permissions,
@@ -102,7 +105,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.11.1"
+__version__ = "2.12.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -502,7 +505,6 @@ TRADUCTIONS_GIT = (
     (r"^Cloning into '(.+)'\.\.\.$", "clone dans {1}"),
     (r"^Auto-merging (.+)$", "fusion auto : {1}"),
     (r"^CONFLICT \(.+\): Merge conflict in (.+)$", "conflit : {1}"),
-    (r"^Deleted branch (\S+)", "branche {1} : suppression OK"),
     (r"^rm '(.+)'$", "retrait : {1}"),
     (r"^nothing to commit", "rien pour un commit"),
     (r"^remote: Create a pull request for '(.+)' on GitHub by visiting:$",
@@ -1959,7 +1961,8 @@ def expliquer(sortie):
     if "repository not found" in s:
         return "repo introuvable sur le serveur : nom faux, repo absent ou droits manquants"
     if "permission to" in s and "denied" in s:
-        return "ce compte n'a pas le droit de push dans ce repo"
+        return ("ce compte n'a pas le droit de push dans ce repo : c'est sans doute celui "
+                "de l'autre compte, perso ou entreprise")
     if erreur_auth(sortie):
         return "refus de GitHub : nouvelle connexion avec le menu Compte GitHub"
     if "publickey" in s:
@@ -2494,7 +2497,7 @@ def entete_projet(chemin):
             etat.append("aucun push sur le serveur" if a_des_commits(chemin)
                         else "aucun commit")
         else:
-            etat += [f"push : {ar[0]} commit(s)", f"pull : {ar[1]}"]
+            etat += [f"push : {ar[0]} commit(s)", f"pull : {ar[1]} commit(s)"]
     print("  Statut  : " + " | ".join(etat))
     op = operation_en_cours(chemin)
     if op:
@@ -2508,8 +2511,8 @@ def voir_modifs(cfg, chemin):
         info("Aucun changement depuis le dernier commit.")
     else:
         info(f"{len(modifs)} fichier(s) avec changements depuis le dernier commit :")
-        for l in modifs[:60]:
-            print(f"       {statut_porcelaine(l):<9} {l[3:]}")
+        for i, l in enumerate(modifs[:60], 1):
+            print(f"    {i:>3}. {statut_porcelaine(l):<9} {l[3:]}")
         if len(modifs) > 60:
             print(f"       ... et {len(modifs) - 60} autre(s)")
     branche, remote = branche_courante(chemin), remote_principal(chemin)
@@ -2529,6 +2532,355 @@ def voir_modifs(cfg, chemin):
                         cwd=chemin, quiet=True)
         for l in log.splitlines():
             print("       " + l)
+    if not modifs:
+        return None
+    while True:
+        print()
+        choix = ask("Choix : # du fichier pour voir ses deux versions, Enter pour revenir", "",
+                    obligatoire=False)
+        if not choix:
+            return "retour"
+        if not (choix.isdigit() and 1 <= int(choix) <= min(len(modifs), 60)):
+            warn("Choix invalide.")
+            continue
+        voir_fichier_local(chemin, chemin_porcelaine(modifs[int(choix) - 1]))
+
+
+def chemin_porcelaine(ligne):
+    """Chemin du fichier dans une ligne de git status --porcelain."""
+    chemin = ligne[3:]
+    if " -> " in chemin:
+        chemin = chemin.split(" -> ", 1)[1]
+    return chemin.strip('"')
+
+
+def dans_le_dernier_commit(chemin, fichier):
+    return git("cat-file", "-e", f"HEAD:{fichier}", cwd=chemin, quiet=True)[0] == 0
+
+
+def voir_fichier_local(chemin, fichier):
+    """Les deux versions d'un fichier : dernier commit a gauche, cette machine a droite."""
+    gauche = contenu_en_ligne(chemin, "HEAD", fichier) if dans_le_dernier_commit(chemin, fichier) else []
+    complet = os.path.join(chemin, fichier)
+    droite = lignes_texte(complet) if os.path.isfile(complet) else []
+    print()
+    print(c(f"  {fichier}", "1;36"))
+    if gauche is None or droite is None:
+        info("Fichier binaire : pas de comparaison ligne par ligne.")
+        return
+    info("En jaune : lignes avec changements. Case vide : ligne absente de ce fichier.")
+    print()
+    cote_a_cote(gauche, droite, "absent" if not gauche else "",
+                "absent" if not os.path.isfile(complet) else "",
+                noms=("Dernier commit", "Cette machine"))
+
+
+def act_comparer_local(cfg, chemin):
+    """Comparer en ligne et en local, depuis l'ecran d'un repo local."""
+    remote = remote_principal(chemin)
+    if not remote:
+        raise Arret("ignore", "aucun lien avec un repo en ligne : Plus de choix, Lier avec GitHub")
+    url = url_remote(remote, chemin)
+    d = {"default_branch": branche_defaut_distante(chemin, remote) or branche_courante(chemin),
+         "html_url": url_web(url) or url}
+    return comparer_copies(cfg, d, chemin)
+
+
+def branches_en_ligne(chemin, remote):
+    """Noms des branches du serveur, lus au dernier fetch."""
+    if not remote:
+        return []
+    _, out, _ = git("branch", "-r", "--format=%(refname:short)", cwd=chemin, quiet=True)
+    return sorted(b[len(remote) + 1:] for b in out.split()
+                  if b.startswith(remote + "/") and not b.endswith("/HEAD"))
+
+
+def act_branches(cfg, chemin):
+    """Branches : passer sur une branche, en faire une, fusionner, supprimer."""
+    while True:
+        titre("Branches")
+        ici, remote = branche_courante(chemin), remote_principal(chemin)
+        locales, distantes = branches_locales(chemin), branches_en_ligne(chemin, remote)
+        liste = [(b, "ici et en ligne" if b in distantes else "ici seulement") for b in locales]
+        liste += [(b, "en ligne seulement") for b in distantes if b not in locales]
+        print()
+        for i, (b, ou) in enumerate(liste, 1):
+            print(f"    {i:>3}. {'*' if b == ici else ' '} {b[:40]:<40} {ou}")
+        print("         * : branche actuelle")
+        print()
+        print("      N. Nouvelle branche")
+        print()
+        choix = ask("Choix : # de la branche ou N, Enter pour revenir", "", obligatoire=False).lower()
+        if not choix:
+            return "retour"
+        if choix == "n":
+            nouvelle_branche(chemin)
+        elif choix.isdigit() and 1 <= int(choix) <= len(liste):
+            action_branche(chemin, remote, ici, *liste[int(choix) - 1])
+        else:
+            warn("Choix invalide.")
+            continue
+        pause()
+
+
+def nouvelle_branche(chemin):
+    nom = ask("Nom de la nouvelle branche, Enter pour revenir", "", obligatoire=False)
+    if not nom:
+        return
+    if git("check-ref-format", "--branch", nom, cwd=chemin, quiet=True)[0] != 0:
+        err("Nom de branche invalide : pas d'espace ni de signe comme ~ ^ : ? *")
+        return
+    code, _, e = git("switch", "-c", nom, cwd=chemin, quiet=True)
+    if code != 0:
+        err("Nouvelle branche impossible : " + expliquer(e))
+        return
+    ok(f"Nouvelle branche : {nom}, maintenant la branche actuelle. Envoyer la met en ligne.")
+
+
+def action_branche(chemin, remote, ici, branche, ou):
+    print()
+    print(c(f"  Branche {branche} : {ou}", "1"))
+    print()
+    actions = []
+    if branche != ici:
+        actions += [("Passer sur cette branche", "passer"),
+                    (f"Fusionner {branche} dans {ici} : merge", "fusionner"),
+                    ("Supprimer cette branche", "supprimer")]
+    if not actions:
+        info("C'est la branche actuelle.")
+        return
+    for i, (libelle, _) in enumerate(actions, 1):
+        print(f"    {i}. {libelle}")
+    print("    0. Retour")
+    choix = ask("Choix", "0")
+    if not (choix.isdigit() and 1 <= int(choix) <= len(actions)):
+        return
+    action = actions[int(choix) - 1][1]
+    locale = ou != "en ligne seulement"
+    if action == "passer":
+        args = ("switch", branche) if locale else ("switch", "-c", branche, "--track", f"{remote}/{branche}")
+        code, _, e = git(*args, cwd=chemin, quiet=True)
+        if code != 0:
+            err("Changement de branche impossible : " + expliquer(e))
+            info("Les changements au commit manquant peuvent bloquer : Envoyer, ou Plus de choix,")
+            info("Changements en attente.")
+        else:
+            ok(f"Branche actuelle : {branche}")
+    elif action == "fusionner":
+        source = branche if locale else f"{remote}/{branche}"
+        code, out, e = git("merge", "--no-edit", source, cwd=chemin, quiet=True)
+        if code == 0:
+            ok(f"Fusion OK : {branche} dans {ici}. Envoyer la met en ligne.")
+            return
+        conflits = fichiers_en_conflit(chemin)
+        if not conflits:
+            err("Fusion impossible : " + expliquer(e or out))
+            return
+        warn("Conflit : des lignes ont des changements dans les deux branches :")
+        for f in conflits[:20]:
+            print("       " + f)
+        if ask_yn("Annuler la fusion ? Rien n'est perdu.", True):
+            git("merge", "--abort", cwd=chemin, quiet=True)
+            info("Fusion : abandon, retour comme avant.")
+        else:
+            info("Ouvrir ces fichiers, garder la bonne version entre <<<<<<< et >>>>>>>,")
+            info("puis : git add .   et   git commit")
+    elif action == "supprimer":
+        if locale:
+            code, _, e = git("branch", "-d", branche, cwd=chemin, quiet=True)
+            if code != 0 and "not fully merged" in e.lower():
+                if not ask_yn("Supprimer cette branche et ses commits sans fusion ?", False):
+                    return
+                code, _, e = git("branch", "-D", branche, cwd=chemin, quiet=True)
+            if code != 0:
+                err("Suppression impossible : " + expliquer(e))
+                return
+            ok(f"Branche {branche} : suppression OK ici.")
+        if ou != "ici seulement" and ask_yn(f"Supprimer aussi la branche {branche} en ligne ?", False):
+            code, _, e = git("push", remote, "--delete", branche, cwd=chemin, quiet=True)
+            if code == 0:
+                ok(f"Branche {branche} : suppression OK en ligne.")
+            else:
+                err("Suppression en ligne impossible : " + expliquer(e))
+
+
+def act_annuler(cfg, chemin):
+    """Annuler les changements d'un fichier, ou le dernier commit."""
+    while True:
+        titre("Annuler")
+        print("    1. Annuler les changements d'un fichier : retour au dernier commit")
+        print("    2. Annuler le dernier commit : ses fichiers restent, commit manquant")
+        print("    0. Retour")
+        choix = ask("Choix", "0")
+        if choix == "1":
+            annuler_fichier(chemin)
+        elif choix == "2":
+            annuler_commit(cfg, chemin)
+        else:
+            return "retour"
+        pause()
+
+
+def annuler_fichier(chemin):
+    modifs = fichiers_modifies(chemin)
+    print()
+    if not modifs:
+        info("Aucun changement depuis le dernier commit.")
+        return
+    for i, l in enumerate(modifs[:60], 1):
+        print(f"    {i:>3}. {statut_porcelaine(l):<9} {l[3:]}")
+    choix = ask("Choix : # du fichier, Enter pour revenir", "", obligatoire=False)
+    if not (choix.isdigit() and 1 <= int(choix) <= min(len(modifs), 60)):
+        return
+    fichier = chemin_porcelaine(modifs[int(choix) - 1])
+    complet = os.path.join(chemin, fichier)
+    if os.path.isdir(complet):
+        info("Dossier nouveau : le supprimer dans le gestionnaire de fichiers si besoin.")
+        return
+    voir_fichier_local(chemin, fichier)
+    print()
+    if not ask_yn("Annuler les changements de ce fichier ? Sans retour.", False):
+        info("Abandon.")
+        return
+    if dans_le_dernier_commit(chemin, fichier):
+        code, _, e = git("restore", "--source=HEAD", "--staged", "--worktree", "--", fichier,
+                         cwd=chemin, quiet=True)
+    else:  # fichier nouveau : il disparait
+        git("rm", "--cached", "--quiet", "--ignore-unmatch", "--", fichier, cwd=chemin, quiet=True)
+        try:
+            os.remove(complet)
+            code, e = 0, ""
+        except OSError as erreur:
+            code, e = 1, str(erreur)
+    if code == 0:
+        ok(f"{fichier} : retour au dernier commit OK.")
+    else:
+        err("Annulation impossible : " + expliquer(e))
+
+
+def annuler_commit(cfg, chemin):
+    print()
+    if not a_des_commits(chemin):
+        info("Aucun commit dans ce repo.")
+        return
+    _, dernier, _ = git("log", "-1", "--format=%h  %s", cwd=chemin, quiet=True)
+    info(f"Dernier commit : {dernier}")
+    en_ligne = git("merge-base", "--is-ancestor", "HEAD", "@{u}", cwd=chemin, quiet=True)[0] == 0
+    if en_ligne:
+        warn("Ce commit est en ligne : un commit inverse le compense, git revert. Envoyer le met")
+        warn("ensuite en ligne.")
+        if not ask_yn("Faire ce commit inverse ?", True):
+            info("Abandon.")
+            return
+        code, _, e = git("revert", "--no-edit", "HEAD", cwd=chemin, quiet=True)
+        if code == 0:
+            ok("Commit inverse OK : Envoyer pour le mettre en ligne.")
+        else:
+            git("revert", "--abort", cwd=chemin, quiet=True)
+            err("Commit inverse impossible : " + expliquer(e))
+        return
+    if not ask_yn("Annuler ce commit ? Ses fichiers restent, commit manquant.", True):
+        info("Abandon.")
+        return
+    a_un_parent = git("rev-parse", "--verify", "-q", "HEAD~1", cwd=chemin, quiet=True)[0] == 0
+    if a_un_parent:
+        code, _, e = git("reset", "--soft", "HEAD~1", cwd=chemin, quiet=True)
+    else:  # premier commit du repo
+        code, _, e = git("update-ref", "-d", "HEAD", cwd=chemin, quiet=True)
+    if code == 0:
+        ok("Annulation du commit OK : ses fichiers restent, commit manquant.")
+    else:
+        err("Annulation impossible : " + expliquer(e))
+
+
+def act_stash(cfg, chemin):
+    """Changements en attente : git stash."""
+    while True:
+        titre("Changements en attente : git stash")
+        _, out, _ = git("stash", "list", "--format=%gd%x1f%cd%x1f%gs",
+                        "--date=format:%Y-%m-%d %H:%M", cwd=chemin, quiet=True)
+        attentes = [l.split("\x1f") for l in out.splitlines() if l.count("\x1f") == 2]
+        print()
+        if not attentes:
+            info("Aucun changement en attente.")
+        for i, (ref, quand, nom) in enumerate(attentes, 1):
+            print(f"    {i:>3}. {quand}  {nom}")
+        modifs = fichiers_modifies(chemin)
+        print()
+        if modifs:
+            print(f"      M. Mettre en attente les changements actuels : {len(modifs)} fichier(s)")
+            print()
+        choix = ask("Choix : # pour reprendre ou supprimer" + (", M" if modifs else "")
+                    + ", Enter pour revenir", "", obligatoire=False).lower()
+        if not choix:
+            return "retour"
+        if choix == "m" and modifs:
+            nom = ask("Nom de cette attente, Enter pour garder", "attente du "
+                      + datetime.now().strftime("%Y-%m-%d %H:%M"))
+            code, _, e = git("stash", "push", "--include-untracked", "-m", nom, cwd=chemin, quiet=True)
+            (ok("Changements en attente : le dossier revient au dernier commit.") if code == 0
+             else err("Mise en attente impossible : " + expliquer(e)))
+        elif choix.isdigit() and 1 <= int(choix) <= len(attentes):
+            ref, quand, nom = attentes[int(choix) - 1]
+            _, fichiers, _ = git("stash", "show", "--include-untracked", "--name-only", ref,
+                                 cwd=chemin, quiet=True)
+            print()
+            info(f"{nom}, {quand} :")
+            for f in fichiers.splitlines()[:30]:
+                print("       " + f)
+            print()
+            print("    1. Reprendre ces changements : git stash pop")
+            print("    2. Supprimer cette attente : git stash drop")
+            print("    0. Retour")
+            action = ask("Choix", "0")
+            if action == "1":
+                code, _, e = git("stash", "pop", ref, cwd=chemin, quiet=True)
+                (ok("Changements repris dans le dossier.") if code == 0
+                 else err("Reprise impossible : " + expliquer(e)))
+            elif action == "2" and ask_yn("Supprimer ces changements en attente ? Sans retour.", False):
+                code, _, e = git("stash", "drop", ref, cwd=chemin, quiet=True)
+                (ok("Attente : suppression OK.") if code == 0
+                 else err("Suppression impossible : " + expliquer(e)))
+            else:
+                continue
+        else:
+            warn("Choix invalide.")
+            continue
+        pause()
+
+
+def menu_plus(cfg, chemin):
+    """Choix plus rares d'un repo local. Retourne "supprime" apres la suppression du .git."""
+    while True:
+        titre("Plus de choix")
+        relie = bool(remote_principal(chemin))
+        print("    1. Remplacer GitHub par ce dossier : force push")
+        print("    2. Changements en attente : git stash")
+        print("    3. Rendre public ou non public")
+        print("    4. " + ("Lier avec un autre repo GitHub" if relie else "Lier avec GitHub"))
+        print("    5. Supprimer le .git de ce dossier")
+        print("    0. Retour")
+        choix = ask("Choix", "0")
+        if choix in ("0", "q"):
+            return None
+        if choix == "5":
+            fin = act_supprimer_git(cfg, chemin)
+            pause()
+            if fin:
+                return "supprime"
+            continue
+        fn = {"1": act_ecraser, "2": act_stash, "3": act_visibilite_projet, "4": act_relier}.get(choix)
+        if not fn:
+            warn("Choix invalide.")
+            continue
+        try:
+            res = executer(fn, cfg, chemin)
+        except KeyboardInterrupt:
+            print()
+            warn("Interruption.")
+            res = None
+        if res != "retour":
+            pause()
 
 
 def act_commit_push(cfg, chemin):
@@ -2575,9 +2927,12 @@ def act_visibilite_projet(cfg, chemin):
 
 def act_relier(cfg, chemin):
     remote = relier(cfg, chemin)
-    if remote:
-        return "ok", f"lien avec {url_web(url_remote(remote, chemin)) or url_remote(remote, chemin)}"
-    return "ignore", "abandon"
+    if not remote:
+        return "ignore", "abandon"
+    url = url_remote(remote, chemin)
+    if not a_des_commits(chemin):  # dossier sans historique : version en ligne, comme Lier puis pull
+        return lier_et_recevoir(cfg, chemin, url)
+    return "ok", f"lien avec {url_web(url) or url} : Envoyer ou Recevoir pour la suite"
 
 
 def act_supprimer_git(cfg, chemin):
@@ -2713,7 +3068,7 @@ def lier_et_recevoir(cfg, chemin, url):
 def menu_projet(cfg, chemin):
     chemin = os.path.normpath(chemin)
     racine, etat = acces_repo(chemin)
-    if etat == "illisible" and ask_yn("Mettre ce .git de cote en .git-illisible, puis lier le dossier avec "
+    if etat == "illisible" and ask_yn("Renommer ce .git en .git-illisible, puis lier le dossier avec "
                                       "son repo en ligne ?", True):
         cible, n = os.path.join(chemin, ".git-illisible"), 2
         while os.path.lexists(cible):
@@ -2726,39 +3081,34 @@ def menu_projet(cfg, chemin):
     remote = remote_principal(chemin)
     if remote and git("fetch", remote, cwd=chemin, quiet=True)[0] != 0:
         warn("Serveur injoignable : le statut push / pull peut dater.")
-    actions = {
-        "1": act_commit_push, "2": act_pull, "3": act_ecraser, "4": voir_modifs,
-        "7": act_visibilite_projet, "8": act_relier,
-    }
+    actions = {"1": act_commit_push, "2": act_pull, "3": voir_modifs, "4": act_comparer_local,
+               "5": act_branches, "6": act_annuler}
     while True:
         titre("Repo local")
         entete_projet(chemin)
-        relie = bool(remote_principal(chemin))
         print()
         print("    1. Envoyer : commit + push")
         print("    2. Recevoir : pull")
-        print("    3. Remplacer GitHub par ce dossier : force push")
-        print("    4. Voir les changements")
-        print("    5. Ouvrir la copie sur cette machine")
-        print("    6. Ouvrir la copie en ligne")
-        print("    7. Rendre public ou non public")
-        print("    8. " + ("Lier avec un autre repo GitHub" if relie else "Lier avec GitHub"))
-        print("    9. Supprimer le .git de ce dossier")
+        print("    3. Voir les changements")
+        print("    4. Comparer en ligne et en local")
+        print("    5. Branches")
+        print("    6. Annuler un commit ou des changements")
+        print("    7. Ouvrir la copie sur cette machine")
+        print("    8. Ouvrir la copie en ligne")
+        print("    9. Plus de choix")
         print("    0. Retour")
         choix = ask("Choix", "0")
-        if choix == "5":
+        if choix == "7":
             print()
             ouvrir_explorateur(chemin)
             continue
-        if choix == "6":
+        if choix == "8":
             print()
             ouvrir_en_ligne(chemin)
             continue
         if choix == "9":
-            if act_supprimer_git(cfg, chemin):
-                pause()
+            if menu_plus(cfg, chemin) == "supprime":
                 return
-            pause()
             continue
         if choix in ("0", "q"):
             return
@@ -2767,11 +3117,13 @@ def menu_projet(cfg, chemin):
             warn("Choix invalide.")
             continue
         try:
-            executer(fn, cfg, chemin)
+            res = executer(fn, cfg, chemin)
         except KeyboardInterrupt:
             print()
             warn("Interruption.")
-        pause()
+            res = None
+        if res != "retour":
+            pause()
 
 
 def _recent(projet):
@@ -2930,6 +3282,7 @@ def act_depots(cfg):
             loc = "oui" if d["full_name"].lower() in locaux else ""
             print(f"    {i:>3}. {nom:<42} {vis:<7} {date:<10}  {loc}")
         print()
+        print("      U. Cloner un repo par son URL")
         print("      C. Changer de compte")
         print("      D. Fermer la session")
         print()
@@ -2942,6 +3295,8 @@ def act_depots(cfg):
             filtre = ""
         elif choix.isdigit() and 1 <= int(choix) <= len(vue):
             menu_depot(cfg, vue[int(choix) - 1], locaux)
+        elif choix.lower() == "u":
+            cloner_par_url(cfg)
         elif choix.lower() == "c":
             changer_compte(cfg)
             filtre = ""
@@ -2969,7 +3324,7 @@ def ouvrir_en_ligne(chemin):
     """Page GitHub du repo auquel ce dossier est relie."""
     remote = remote_principal(chemin)
     if not remote:
-        warn("Ce dossier n'a aucun lien avec un repo en ligne : le faire avec le choix 8.")
+        warn("Ce dossier n'a aucun lien avec un repo en ligne : Plus de choix, Lier avec GitHub.")
         return
     url = url_web(url_remote(remote, chemin))
     if not url:
@@ -3185,7 +3540,8 @@ def case_fichier(nb_lignes, taille_octets, date_texte, etat=""):
     return ", ".join(x for x in (debut, date_texte, etat) if x)
 
 
-def cote_a_cote(gauche, droite, titre_gauche, titre_droite, contexte=3, maxi=400):
+def cote_a_cote(gauche, droite, titre_gauche, titre_droite, contexte=3, maxi=400,
+                noms=("En ligne", "En local")):
     """Les deux versions d'un fichier cote a cote, en ligne a gauche et en local
     a droite. Les lignes differentes sont en jaune ; une case vide signifie que
     la ligne n'existe pas de ce cote."""
@@ -3200,7 +3556,7 @@ def cote_a_cote(gauche, droite, titre_gauche, titre_droite, contexte=3, maxi=400
             return " " * (6 + col)
         texte = couper(texte.expandtabs(4).replace("\r", ""), col)
         return c(f"{num:>5} ", "36") + c(texte.ljust(col), "1;33")
-    print(c(f"    {'':6}{'En ligne':<{col}} | {'':6}En local", "1"))
+    print(c(f"    {'':6}{noms[0]:<{col}} | {'':6}{noms[1]}", "1"))
     print(f"    {'':6}{couper(titre_gauche, col):<{col}} | {'':6}{couper(titre_droite, col)}")
     print(f"    {'-' * (6 + col)}-+-{'-' * (6 + col)}")
     groupes = list(difflib.SequenceMatcher(None, gauche, droite, autojunk=False)
@@ -3511,6 +3867,20 @@ def cloner(cfg, d):
     return dest
 
 
+def cloner_par_url(cfg):
+    """Clone d'un repo qui n'est pas dans la liste du compte : URL ou compte/nom."""
+    saisie = ask("Repo : URL ou compte/nom, Enter pour revenir", "", obligatoire=False)
+    if not saisie:
+        return
+    url = url_repo_en_ligne(cfg, saisie)
+    nom = (infos_url(url)[2] or os.path.basename(url.rstrip("/"))).removesuffix(".git")
+    dest = executer(cloner, cfg, {"name": nom, "full_name": cle_depot(url) or nom, "clone_url": url})
+    if dest:
+        menu_projet(cfg, dest)
+    else:
+        pause()
+
+
 def sensibles_sur_github(cfg, d):
     """Fichiers secrets (.env, cles privees...) presents dans la branche principale."""
     ref = urllib.parse.quote(d.get("default_branch") or "main")
@@ -3607,14 +3977,14 @@ def act_compte(cfg):
     if user:
         actions = [("Changer de moyen de connexion", changer_moyen),
                    ("Changer de compte", changer_compte),
-                   ("Changer de serveur GitHub Entreprise", changer_serveur),
+                   ("Changer de serveur GitHub, par exemple GitHub Enterprise", changer_serveur),
                    ("Voir les permissions de la connexion", afficher_permissions)]
         if cles:
             actions.append(("Temps de garde du compte sur cette machine", choisir_garde))
         actions.append(("Fermer la session", deconnexion))
     else:
         actions = [("Se connecter", connexion_interactive),
-                   ("Changer de serveur GitHub Entreprise", changer_serveur)]
+                   ("Changer de serveur GitHub, par exemple GitHub Enterprise", changer_serveur)]
         if traces_compte(cfg):
             actions.append(("Supprimer les identifiants de cette machine", act_supprimer_compte))
     fn = menu_numerote(actions)
@@ -4394,7 +4764,8 @@ def menu_repos(cfg, nom_menu):
         if choix in ("0", "q", "quit", "exit"):
             return
         if choix == "4":
-            lancer(deconnexion, cfg)
+            if executer(deconnexion, cfg):
+                pause()
             continue
         if choix == "5" and identifiants:
             lancer(act_supprimer_identifiants, cfg)

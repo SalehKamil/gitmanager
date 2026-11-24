@@ -93,19 +93,30 @@ Connexion au compte GitHub perso.
      d'un fichier, côte à côte.
    - Voir les droits sur ce repo : le rôle du compte et ses droits.
    - Supprimer de GitHub.
+   - U : cloner un repo par son URL ou compte/nom, même hors de la liste.
    - C : changer de compte.
    - D : fermer la session, en gardant ou en supprimant le compte.
 2. Repos GitHub en local : la liste des repos trouvés sur la machine.
    - Envoyer : commit + push ; le programme demande le message du commit,
      Enter garde le message proposé.
    - Recevoir : pull.
-   - Remplacer GitHub par ce dossier : force push.
-   - Voir les changements.
+   - Voir les changements : les fichiers au commit manquant ; le numéro
+     d'un fichier montre sa version du dernier commit et celle de la
+     machine, côte à côte.
+   - Comparer en ligne et en local : le même tableau que pour un repo en
+     ligne.
+   - Branches : passer sur une branche, en faire une nouvelle, fusionner une
+     branche dans la branche actuelle, supprimer une branche ici ou en
+     ligne.
+   - Annuler un commit ou des changements : les changements d'un fichier,
+     ou le dernier commit. Un commit déjà en ligne est compensé par un
+     commit inverse, `git revert`.
    - Ouvrir la copie sur cette machine : le dossier dans le gestionnaire de
      fichiers du système.
    - Ouvrir la copie en ligne : la page du repo dans le navigateur.
-   - Rendre public ou non public, lier avec un autre repo GitHub, supprimer
-     le `.git`.
+   - Plus de choix : remplacer GitHub par ce dossier, force push ;
+     changements en attente, `git stash` ; rendre public ou non public ;
+     lier avec un autre repo GitHub ; supprimer le `.git`.
    - Tous les repos d'un dossier : push ou pull de chacun, en une fois.
    - Envoyer un dossier : sans repo local, ou pour un nouveau projet ; le
      programme demande le nom, la description et si le repo est public.
