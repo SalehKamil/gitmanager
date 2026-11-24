@@ -52,15 +52,17 @@ separes. Les textes du programme evitent les mots qui prennent un accent.
   4. Fermer la session, avec une session ouverte, puis garder le compte sur
      cette machine ou le supprimer sans trace : connexion enregistree,
      identifiants en clair, nom et email des commits, reglages du compte.
-  5. Voir les commandes Git : git add, commit, push, pull et les autres
-     s'affichent avec leur sortie. Le meme choix les cache.
   Supprimer le compte de cette machine : pour un compte garde sans session.
 
-Connexion : 1. par le navigateur, avec GitHub CLI ou Git Credential
-Manager, le compte reste sur cette machine ; 2. par jeton, dans la session
-seulement, jamais sur le disque, fin apres 15 minutes sans action et a la
-fermeture du programme. La connexion par code apparait quand l'application
-GitHub de gitmanager est configuree.
+Connexion : 1. Se connecter sur le navigateur, avec GitHub CLI ou Git
+Credential Manager : le compte reste sur cette machine pour un temps au
+choix, cette session, 8 heures, 7 jours, 30 jours ou toujours, puis il est
+supprime sans trace ; avec GitHub CLI 2.103 ou plus, jeton qui expire et se
+renouvelle seul. 2. Saisir un jeton : dans la session seulement, jamais sur
+le disque, fin apres 15 minutes sans action et a la fermeture du programme.
+La connexion par code apparait quand l'application GitHub de gitmanager est
+configuree. Les commandes Git qui changent un repo s'affichent avec leur
+sortie.
 
 Securite : HTTPS ou SSH seulement, certificats toujours verifies, aucun
 jeton ecrit sur le disque, dans une URL ni sur la ligne de commande ; alerte
@@ -90,7 +92,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.6.0"
+__version__ = "2.7.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -361,10 +363,9 @@ def _affiche(args):
     return " ".join(f'"{a}"' if (" " in str(a) or not str(a)) else str(a) for a in args)
 
 
-# Commandes Git affichees, avec leur sortie, quand l'option du menu principal
-# Voir les commandes Git est active : celles qui changent un repo ou parlent au
-# serveur, jamais les simples lectures.
-VOIR_GIT = {"actif": False}
+# Commandes Git affichees avec leur sortie : celles qui changent un repo, sa
+# config ou parlent au serveur, jamais les simples lectures.
+VOIR_GIT = {"actif": True}
 ACTIONS_GIT = {"add", "commit", "push", "pull", "fetch", "clone", "init", "merge", "rebase",
                "reset", "rm", "remote", "checkout", "switch", "branch", "stash", "tag"}
 
@@ -1228,15 +1229,16 @@ def connexion_interactive(cfg, autre_compte=False):
         print()
         print(f"  Connexion au compte GitHub {nom_compte()} :")
         print()
-        print("    1. Par le navigateur")
-        print("    2. Par jeton")
+        print("    1. Se connecter sur le navigateur")
+        print("    2. Saisir un jeton")
         if code_dispo:
-            print("    3. Par code")
+            print("    3. Se connecter par code")
         print("    0. Annuler")
         choix = ask("Choix", "0")
         if choix == "1":
-            warn("Le compte reste sur cette machine. En fin de session, le programme propose")
-            warn("de le garder ou de le supprimer, sans trace.")
+            warn("Le compte reste sur cette machine pour un temps au choix : cette session,")
+            warn("8 heures, 7 jours, 30 jours ou toujours. Fermer la session peut aussi le")
+            warn("supprimer sans trace.")
             if not ask_yn("Continuer ?", True):
                 continue
             connecte = connexion_navigateur(cfg, autre_compte)
@@ -1257,6 +1259,28 @@ def connexion_interactive(cfg, autre_compte=False):
             cfg.pop(cle("moyen_connexion"), None)
             sauver(cfg)
             return True
+
+
+def gh_jetons_expirants():
+    """GitHub CLI 2.103 ou plus sait demander un jeton qui expire et se renouvelle
+    seul : option --expiring, plus sure qu'un jeton sans fin."""
+    p = run([chemin_gh(), "--version"])
+    m = re.search(r"(\d+)\.(\d+)\.\d+", p.stdout or "")
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (2, 103)
+
+
+def rafraichir_session(cfg):
+    """Nouveau jeton sans question pour un compte de cette machine, par exemple
+    quand le jeton de GitHub CLI a expire : GitHub CLI le renouvelle."""
+    methode = SESSION["methode"]
+    if methode not in ("gh", "gcm"):
+        return False
+    tok = token_silencieux(cfg, methode)
+    code, user, _ = requete(cfg, "GET", "/user", token=tok) if tok else (0, {}, {})
+    if code != 200:
+        return False
+    SESSION.update(token=tok, user=user)
+    return True
 
 
 def connexion_navigateur(cfg, autre_compte=False):
@@ -1285,7 +1309,11 @@ def connexion_navigateur(cfg, autre_compte=False):
         info("Copier le code de 8 lettres et chiffres, taper Enter,")
         info("puis le coller dans la page qui s'ouvre et cliquer sur 'Authorize'.")
         print()
-        p = subprocess.run([chemin_gh(), "auth", "login", "--web", "-h", h, "-p", "https"])
+        cmd = [chemin_gh(), "auth", "login", "--web", "-h", h, "-p", "https"]
+        if gh_jetons_expirants():
+            cmd.append("--expiring")
+            info("Jeton valable quelques heures, puis GitHub CLI en demande un autre tout seul.")
+        p = subprocess.run(cmd)
         if p.returncode != 0:
             err("Connexion impossible ou abandon.")
             return False
@@ -1307,7 +1335,65 @@ def connexion_navigateur(cfg, autre_compte=False):
         return False
     demarrer_session(cfg, methode, tok, user)
     ok(f"Connexion OK : {user.get('login')}")
+    choisir_garde(cfg)
     return True
+
+
+# Temps de garde d'un compte sur cette machine, choisi a la connexion par le
+# navigateur : pour la session, un nombre d'heures ou de jours, ou toujours. A la
+# fin du temps, le compte est supprime sans trace, comme avec Fermer la session.
+GARDES = (("Pour cette session : suppression sans trace en fin de programme", "session"),
+          ("8 heures", 8 * 3600), ("7 jours", 7 * 86400), ("30 jours", 30 * 86400),
+          ("Toujours", None))
+
+
+def choisir_garde(cfg):
+    """Temps de garde du compte actif sur cette machine."""
+    print()
+    print("  Temps de garde du compte sur cette machine :")
+    for i, (libelle, _) in enumerate(GARDES, 1):
+        print(f"    {i}. {libelle}")
+    choix = ask("Choix", "1")
+    if not (choix.isdigit() and 1 <= int(choix) <= len(GARDES)):
+        warn("Choix invalide : pour cette session.")
+        choix = "1"
+    valeur = GARDES[int(choix) - 1][1]
+    if valeur is None:
+        cfg.pop(cle("garde"), None)
+    else:
+        cfg[cle("garde")] = valeur if valeur == "session" else int(time.time()) + valeur
+    sauver(cfg)
+    ok(f"Compte sur cette machine : {texte_garde(cfg) or 'toujours'}.")
+
+
+def texte_garde(cfg, profil=None):
+    garde = cfg.get(cle("garde", profil))
+    if garde == "session":
+        return "pour cette session"
+    if isinstance(garde, int):
+        return "jusqu'au " + datetime.fromtimestamp(garde).strftime("%Y-%m-%d %H:%M")
+    return ""
+
+
+def verifier_gardes(cfg, demarrage=False, fin=False):
+    """Supprime sans trace les comptes dont le temps de garde est fini. Un compte
+    pour cette session part en fin de programme, ou au demarrage suivant si le
+    programme s'est arrete sans finir."""
+    actif = PROFIL["nom"]
+    for nom in PROFILS:
+        garde = cfg.get(cle("garde", nom))
+        if garde is None or (garde == "session" and not (demarrage or fin)) \
+                or (isinstance(garde, int) and time.time() < garde):
+            continue
+        activer_profil(nom)
+        login = (SESSION["user"] or {}).get("login") or cfg.get(cle("login"))
+        SESSION.update(token="", user=None, methode=None)
+        print()
+        warn(f"Compte GitHub {nom_compte()} {login or ''} : fin du temps de garde sur cette machine.")
+        supprimer_compte(cfg, login)
+        if nom == actif:
+            NAVIGATION["menu_principal"] = True
+    activer_profil(actif)
 
 
 def connexion_enregistree(cfg):
@@ -1491,7 +1577,7 @@ def supprimer_compte(cfg, login=None):
         notes.pop(cle_git)
     if not notes:
         cfg.pop("identite_ecrite", None)
-    for k in ("login", "methode", "cles", "enregistrer_connexion", "moyen_connexion"):
+    for k in ("login", "methode", "cles", "enregistrer_connexion", "moyen_connexion", "garde"):
         cfg.pop(cle(k), None)
     sauver(cfg)
     restes += traces_compte(cfg)
@@ -1619,6 +1705,8 @@ def api(cfg, verbe, chemin, data=None):
     for _ in range(3):
         code, rep, hdr = requete(cfg, verbe, chemin, data)
         if code == 401:
+            if rafraichir_session(cfg):
+                continue
             SESSION["token"] = ""
             if SESSION["methode"] == "gcm":
                 oublier_gcm(cfg)
@@ -1823,6 +1911,8 @@ def recuperer(cfg, chemin, remote, auto):
                     git("remote", "set-url", remote, f"https://{h}/{o}/{r}.git", cwd=chemin)
                     continue
             elif erreur_auth(e):
+                if rafraichir_session(cfg):
+                    continue
                 warn("GitHub demande une connexion.")
                 SESSION["token"] = ""
                 if connexion_interactive(cfg):
@@ -1941,6 +2031,8 @@ def pousser(cfg, chemin, remote, branche, auto=False):
                 and SESSION["methode"] in EN_MEMOIRE + ("gh",):
             if mettre_a_jour_permissions(cfg, "contents=write, push dans ce repo"):
                 continue
+        if tentative == 1 and erreur_auth(e) and not refus and rafraichir_session(cfg):
+            continue
         if tentative == 1 and not auto and erreur_auth(e) and not refus:
             SESSION["token"] = ""
             if connexion_interactive(cfg):
@@ -3187,13 +3279,15 @@ def act_compte(cfg):
         warn(f"Aucune session sur {host(cfg)}.")
     cles = cles_enregistrees(cfg)
     if cles:
-        info(f"Compte sur cette machine, par {NOMS_METHODES[cles]}.")
+        info(f"Compte sur cette machine, par {NOMS_METHODES[cles]}, {texte_garde(cfg) or 'toujours'}.")
     print()
     if user:
         actions = [("Changer de moyen de connexion", changer_moyen),
                    ("Changer de compte", changer_compte),
                    ("Changer de serveur GitHub Entreprise", changer_serveur),
                    ("Voir les permissions de la connexion", afficher_permissions)]
+        if cles:
+            actions.append(("Temps de garde du compte sur cette machine", choisir_garde))
         actions.append(("Fermer la session", deconnexion))
     else:
         actions = [("Se connecter", connexion_interactive),
@@ -3846,17 +3940,6 @@ def pour_un_compte(noms, action, fn):
     return lancer_pour
 
 
-def basculer_commandes_git(cfg):
-    VOIR_GIT["actif"] = not VOIR_GIT["actif"]
-    cfg["voir_git"] = VOIR_GIT["actif"]
-    sauver(cfg)
-    print()
-    if VOIR_GIT["actif"]:
-        ok("Les commandes Git s'affichent : git add, commit, push, pull et les autres.")
-    else:
-        ok("Les commandes Git ne s'affichent plus.")
-
-
 def actions_principales(cfg):
     """Choix du menu principal sous les deux options. Se deconnecter apparait
     seulement pour un compte connecte ; sans compte connecte, Se connecter."""
@@ -3869,8 +3952,6 @@ def actions_principales(cfg):
         actions = [("Changer de moyen de connexion",
                     pour_un_compte(connectes, "Changer de moyen de connexion", changer_moyen)),
                    ("Fermer la session", pour_un_compte(connectes, "Fermer la session", deconnexion))]
-    actions.append(("Cacher les commandes Git" if VOIR_GIT["actif"] else "Voir les commandes Git",
-                    basculer_commandes_git))
     if enregistres:
         actions.append(("Supprimer le compte de cette machine",
                         pour_un_compte(enregistres, "Supprimer le compte",
@@ -3881,13 +3962,14 @@ def actions_principales(cfg):
 def choisir_fonction(cfg):
     """Menu principal. Retourne le profil de l'option choisie, ou None pour quitter."""
     while True:
+        verifier_gardes(cfg)
         titre("MENU PRINCIPAL")
         actions, connectes, enregistres = actions_principales(cfg)
         for nom in PROFILS:
             if nom in connectes:
                 etat = PROFILS[nom]["user"].get("login")
                 if cles_enregistrees(cfg, nom):
-                    etat += ", compte sur cette machine"
+                    etat += ", compte sur cette machine " + (texte_garde(cfg, nom) or "toujours")
             elif nom in enregistres:
                 etat = "pas de session, traces sur cette machine"
             else:
@@ -3925,6 +4007,9 @@ def connexion_obligatoire(cfg):
 def menu_repos(cfg, nom_menu):
     """Repos GitHub en ligne, en local et compte, pour le compte actif."""
     while not NAVIGATION["menu_principal"] and connexion_obligatoire(cfg):
+        verifier_gardes(cfg)
+        if NAVIGATION["menu_principal"]:
+            return
         titre(nom_menu)
         ligne_compte(cfg)
         print()
@@ -3975,7 +4060,8 @@ def main():
     migrer_ancienne_config(cfg)
     if not preparer_outils(cfg):
         sys.exit(1)
-    VOIR_GIT["actif"] = bool(cfg.get("voir_git"))
+    cfg.pop("voir_git", None)
+    verifier_gardes(cfg, demarrage=True)
     for nom in PROFILS:  # comptes de cette machine : session ouverte au demarrage
         activer_profil(nom)
         if cles_enregistrees(cfg) and connexion_enregistree(cfg):
@@ -3997,6 +4083,7 @@ def main():
             else:
                 menu_entreprise(cfg)
     finally:
+        verifier_gardes(cfg, fin=True)
         for session in PROFILS.values():  # oubli des jetons des deux comptes
             session.update(token="", user=None, methode=None)
     print("\n  Fin du programme.\n")
