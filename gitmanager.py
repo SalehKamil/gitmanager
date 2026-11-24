@@ -26,10 +26,10 @@ Au lancement : logo et accroche, puis le menu principal. Chaque option
 demande d'abord la connexion a son compte GitHub ; sans connexion, retour au
 menu principal. Les deux comptes restent separes.
 
-  1. Gerer les repos GitHub perso, connexion au compte GitHub perso
-     - Gerer les repos GitHub : fichiers, commits, public / prive, ouvrir la
+  1. Gerer les repos GitHub, connexion au compte GitHub perso
+     - Repos GitHub en ligne : fichiers, commits, public / prive, ouvrir la
        copie locale ou cloner le projet en local, voir les acces, supprimer.
-     - Gerer les repos locaux : envoyer, c'est-a-dire commit + push ; mettre
+     - Repos GitHub en local : envoyer, c'est-a-dire commit + push ; mettre
        a jour par pull ; ecraser par force push ; push ou pull de tous les
        repos d'un dossier ; sans repo local, envoi d'un dossier sur GitHub
        avec nom, description et visibilite.
@@ -80,7 +80,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -2075,7 +2075,7 @@ def act_autre_dossier(cfg):
 
 
 def act_depots_locaux(cfg):
-    titre("Gerer les repos locaux")
+    titre("Repos GitHub en local")
     info("Recherche des repos git de cet ordinateur...")
     projets = projets_de_la_machine(cfg)[:30]
     print()
@@ -2145,13 +2145,13 @@ def act_tout(cfg):
               "ignore": "ignore(s)", "erreur": "en erreur"}
     info("Bilan : " + ", ".join(f"{n} {resume[s]}" for s, n in bilan.items()))
     if bilan.get("conflit"):
-        info("Projets en conflit : les ouvrir dans Gerer les repos locaux et utiliser Envoyer.")
+        info("Projets en conflit : les ouvrir dans Repos GitHub en local et utiliser Envoyer.")
 
 
 # Repos GitHub : liste, navigation, visibilite, suppression
 
 def act_depots(cfg):
-    titre("Repos GitHub")
+    titre("Repos GitHub en ligne")
     if not assurer_connexion(cfg):
         return
     locaux = index_locaux(cfg)
@@ -3139,7 +3139,7 @@ def choisir_fonction(cfg):
         if user:
             print(c(f"  Compte GitHub {libelle} : {user.get('login')}", "90"))
     print()
-    print("    1. Gerer les repos GitHub perso")
+    print("    1. Gerer les repos GitHub")
     print("    2. Entreprise : importer un repo, gerer les repos GitHub de l'entreprise")
     print("    0. Quitter")
     return {"1": "perso", "2": "entreprise"}.get(ask("Choix", "0"))
@@ -3158,13 +3158,13 @@ def connexion_obligatoire(cfg):
 
 
 def menu_repos(cfg, nom_menu):
-    """Repos GitHub, repos locaux et compte, pour le compte actif."""
+    """Repos GitHub en ligne, en local et compte, pour le compte actif."""
     while connexion_obligatoire(cfg):
         titre(nom_menu)
         ligne_compte(cfg)
         print()
-        print("    1. Gerer les repos GitHub")
-        print("    2. Gerer les repos locaux")
+        print("    1. Repos GitHub en ligne")
+        print("    2. Repos GitHub en local")
         print("    3. Compte GitHub")
         print("    0. Retour")
         choix = ask("Choix", "0")
@@ -3178,7 +3178,7 @@ def menu_repos(cfg, nom_menu):
 
 
 def menu_perso(cfg):
-    menu_repos(cfg, "OPTION 1 : REPOS GITHUB PERSO")
+    menu_repos(cfg, "OPTION 1 : GERER LES REPOS GITHUB")
 
 
 def menu_entreprise(cfg):

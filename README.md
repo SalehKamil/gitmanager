@@ -59,11 +59,11 @@ au nouvel essai, sans reconnexion.
 Dans chaque menu, Entrée revient en arrière d'un niveau ; au menu principal,
 Entrée quitte le programme.
 
-### Option 1 : gérer les repos GitHub perso
+### Option 1 : gérer les repos GitHub
 
 Connexion au compte GitHub perso.
 
-1. Gérer les repos GitHub : la liste des repos en ligne.
+1. Repos GitHub en ligne : la liste des repos sur GitHub.
    - Parcourir les fichiers et voir les commits.
    - Rendre public ou privé.
    - Ouvrir la copie : le dossier s'ouvre dans le gestionnaire de fichiers
@@ -72,7 +72,7 @@ Connexion au compte GitHub perso.
    - Ouvrir dans le navigateur.
    - Supprimer.
    - Voir les accès à ce repo : le rôle du compte et ses droits.
-2. Gérer les repos locaux : la liste des repos trouvés sur l'ordinateur.
+2. Repos GitHub en local : la liste des repos trouvés sur l'ordinateur.
    - Envoyer : commit et push.
    - Mettre à jour : pull.
    - Écraser : force push, GitHub prend le contenu du dossier.
