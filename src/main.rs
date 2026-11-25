@@ -5,11 +5,17 @@
 mod affichage;
 mod config;
 mod erreur;
+mod git;
 mod saisie;
 mod session;
 mod urls;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// GITMANAGER_DEBUG=1 : les erreurs gardent leur detail technique, en anglais
+pub fn debug() -> bool {
+    std::env::var_os("GITMANAGER_DEBUG").is_some_and(|v| !v.is_empty())
+}
 
 /// Fin du programme sans passer par le menu principal : fin de l'entree
 /// standard ou Ctrl+C pendant une question.
