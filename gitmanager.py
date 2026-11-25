@@ -33,7 +33,7 @@ separes. Les textes du programme evitent les mots qui prennent un accent.
        public, ouvrir la copie sur cette machine ou cloner le projet, ouvrir
        la copie en ligne, comparer en ligne et en local dans un tableau a
        deux colonnes puis les deux versions d'un fichier, voir les droits,
-       supprimer ; C pour changer de compte, D pour fermer la session.
+       supprimer depuis le terminal, permission demandee si elle manque.
      - Repos GitHub en local : Envoyer, commit + push avec le message du
        commit au choix ; Recevoir, pull ; voir les changements, avec les
        deux versions d'un fichier ; comparer en ligne et en local ;
@@ -41,9 +41,10 @@ separes. Les textes du programme evitent les mots qui prennent un accent.
        sur cette machine ou en ligne ; git stash ; force push ; public ou
        non public ; lien ; suppression du .git ; push ou
        pull de tous les repos d'un dossier ; envoi d'un dossier sur GitHub ;
-       dossier sans git : lien avec son repo en ligne, puis pull.
+       clone d'un repo par son URL ; dossier sans git : lien avec son repo
+       en ligne, puis pull.
      - Compte GitHub : moyen de connexion, compte, serveur, permissions,
-       fin de session.
+       temps de garde. Fermer la session : choix 4 du menu des repos.
 
   2. Entreprise, connexion au compte GitHub de l'entreprise
      - Importer un repo GitHub par son URL, compte/nom ou un dossier de la
@@ -106,7 +107,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.13.3"
+__version__ = "2.14.0"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -393,7 +394,8 @@ def _affiche(args):
 # config ou parlent au serveur, jamais les simples lectures.
 VOIR_GIT = {"actif": True}
 ACTIONS_GIT = {"add", "commit", "push", "pull", "fetch", "clone", "init", "merge", "rebase", "revert", "restore",
-               "reset", "rm", "remote", "checkout", "switch", "branch", "stash", "tag"}
+               "reset", "rm", "remote", "checkout", "switch", "branch", "stash", "tag", "update-ref",
+               "checkout-index", "cherry-pick", "mv", "clean"}
 
 
 def sous_commande(args):
@@ -423,6 +425,8 @@ def commande_visible(args):
     if sc == "branch":
         return any(a in ("-m", "-M", "-d", "-D", "--set-upstream-to") or a.startswith("--set-upstream-to")
                    for a in suite)
+    if sc == "symbolic-ref":  # git symbolic-ref HEAD refs/heads/x change la branche ; sinon lecture
+        return len([a for a in suite if not a.startswith("-")]) == 2
     return sc in ACTIONS_GIT
 
 
@@ -451,24 +455,24 @@ def git_direct(*args, cwd=None):
     args = [str(a) for a in args]
     if args and args[0] == "clone":
         args.insert(1, "--progress")
-    p = subprocess.Popen(["git"] + args, cwd=cwd, env=_env_git(), stdin=subprocess.DEVNULL,
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                         encoding="utf-8", errors="replace")
     phase, lignes, dernier = "", [], None
-    for ligne in p.stdout:  # les retours chariot de la progression coupent aussi les lignes
-        ligne = ligne.strip()
-        if not ligne:
-            continue
-        lignes.append(ligne)
-        etape = progression_git(ligne)
-        if etape and etape != dernier:
-            dernier = etape
-            nom, pourcent = etape
-            if nom != phase and phase:
-                print()
-            phase = nom
-            print(f"\r     {nom} : {pourcent} %   ", end="", flush=True)
-    code = p.wait()
+    with subprocess.Popen(["git"] + args, cwd=cwd, env=_env_git(), stdin=subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                          encoding="utf-8", errors="replace") as p:
+        for ligne in p.stdout:  # les retours chariot de la progression coupent aussi les lignes
+            ligne = ligne.strip()
+            if not ligne:
+                continue
+            lignes.append(ligne)
+            etape = progression_git(ligne)
+            if etape and etape != dernier:
+                dernier = etape
+                nom, pourcent = etape
+                if nom != phase and phase:
+                    print()
+                phase = nom
+                print(f"\r     {nom} : {pourcent} %   ", end="", flush=True)
+        code = p.wait()
     if phase:
         print()
     if code != 0:
@@ -1275,12 +1279,13 @@ def demarrer_session(cfg, methode, tok, user):
     configurer_identite(cfg, user)
 
 
-def demander_secret(serveur, avec_utilisateur=False):
+def demander_secret(serveur, avec_utilisateur=False, aide=True):
     """Jeton (ou mot de passe) saisi sans affichage. Il reste en memoire :
     rien n'est ecrit sur le disque. Retourne (utilisateur, secret)."""
-    info(f"Faire un jeton sur https://{serveur}/settings/tokens : jeton fin, pour les")
-    info("seuls repos utiles, valable peu de temps, jamais dans un fichier.")
-    info("Le jeton reste dans la session, jamais sur le disque.")
+    if aide:
+        info(f"Faire un jeton sur https://{serveur}/settings/tokens : jeton fin, pour les")
+        info("seuls repos utiles, valable peu de temps, jamais dans un fichier.")
+        info("Le jeton reste dans la session, jamais sur le disque.")
     utilisateur = ask("Nom d'utilisateur, Enter pour un jeton GitHub", "",
                       obligatoire=False) if avec_utilisateur else ""
     try:
@@ -1900,6 +1905,11 @@ def mettre_a_jour_permissions(cfg, besoin, hdr=None):
     if SESSION["methode"] == "code":
         info("Ajouter cette permission dans l'application GitHub de gitmanager, puis")
         info(f"accepter le changement sur https://{host(cfg)}/settings/installations.")
+    elif SESSION["methode"] in ("gcm", "gh"):
+        # connexion par le navigateur : pas de jeton a modifier sur GitHub
+        info(f"{NOMS_METHODES[SESSION['methode']]} ne donne pas cette permission : menu Compte")
+        info("GitHub, Changer de moyen de connexion, puis Saisir un jeton qui l'a.")
+        return False
     else:
         info(f"Ajouter cette permission au jeton sur https://{host(cfg)}/settings/tokens,")
         info("sans en faire un nouveau : le changement compte tout de suite.")
@@ -1950,6 +1960,20 @@ def message_api(rep):
         if anglais in texte:
             return francais
     return "refus de GitHub" + (f" : {rep.get('message')}" if DEBUG and rep.get("message") else "")
+
+
+# Repos supprimes pendant cette session : juste apres la suppression, GitHub les
+# liste encore un moment ; ils restent caches jusqu'a la fin du programme.
+SUPPRIMES = set()
+
+
+def liste_repos(cfg, tri=""):
+    """Repos du compte en session, sans ceux supprimes pendant cette session."""
+    repos = api_liste(cfg, "/user/repos?per_page=100" + (f"&sort={tri}" if tri else "")
+                      + "&affiliation=owner,collaborator,organization_member")
+    if repos is None:
+        return None
+    return [d for d in repos if (d.get("full_name") or "").lower() not in SUPPRIMES]
 
 
 def api_liste(cfg, chemin):
@@ -2144,17 +2168,31 @@ def verifier_sous_repos(chemin, auto):
         ok(f"{len(liens)} dossier(s) hors du commit, notes dans le .gitignore.")
 
 
+def gitignore_standard(cfg, chemin):
+    """Propose un .gitignore standard une fois par dossier : apres un refus, la
+    question ne revient pas a chaque envoi."""
+    gi = Path(chemin) / ".gitignore"
+    refus = cfg.get("sans_gitignore") or []
+    if gi.exists() or os.path.normcase(chemin) in refus:
+        return
+    warn("Pas de .gitignore : risque d'envoyer .venv, node_modules, caches...")
+    if ask_yn("Ajouter un .gitignore standard pour Python et Node ?", True):
+        gi.write_text(GITIGNORE, encoding="utf-8")
+        ok("Nouveau .gitignore")
+    else:
+        cfg["sans_gitignore"] = refus + [os.path.normcase(chemin)]
+        sauver(cfg)
+        info("Plus de question sur le .gitignore pour ce dossier.")
+
+
 def committer(cfg, chemin, message=None, auto=False, proposer_gitignore=True):
     """git add -A + git commit. Retourne le nombre de fichiers commites."""
     if not fichiers_modifies(chemin):
         if not auto:
             info("Aucun changement depuis le dernier commit.")
         return 0
-    if not auto and proposer_gitignore and not (Path(chemin) / ".gitignore").exists():
-        warn("Pas de .gitignore : risque d'envoyer .venv, node_modules, caches...")
-        if ask_yn("Ajouter un .gitignore standard pour Python et Node ?", True):
-            (Path(chemin) / ".gitignore").write_text(GITIGNORE, encoding="utf-8")
-            ok("Nouveau .gitignore")
+    if not auto and proposer_gitignore:
+        gitignore_standard(cfg, chemin)
     code, _, e = git("add", "-A", cwd=chemin, quiet=auto)
     if code != 0:
         raise Arret("erreur", "erreur de git add : " + expliquer(e))
@@ -2446,11 +2484,15 @@ def nettoyer_chemin(saisie):
 
 
 def choisir_dossier(cfg, question="Dossier du projet", cle="dernier_dossier"):
+    """Dossier saisi, cinq essais au plus ; None pour revenir d'un niveau. Au
+    premier essai, Enter garde le dossier propose et 0 revient."""
     defaut = cfg.get(cle) or os.getcwd()
     for essai in range(1, 6):
-        saisie = ask(f"{question}, Enter pour revenir", "" if essai > 1 else defaut,
-                     obligatoire=False)
-        if not saisie:
+        if essai == 1:
+            saisie = ask(f"{question}, 0 pour revenir", defaut, obligatoire=False)
+        else:
+            saisie = ask(f"{question}, Enter pour revenir", "", obligatoire=False)
+        if not saisie or saisie == "0":
             return None
         chemin = nettoyer_chemin(saisie)
         if os.path.isdir(chemin):
@@ -2500,19 +2542,14 @@ def lier_a_github(cfg, chemin, nouveau=False):
     if not assurer_connexion(cfg):
         return None
     if not nouveau:
-        meme = repo_du_meme_nom(cfg, chemin)
         print()
-        print("    1. " + (f"Lier avec {meme['full_name']}" if meme
-                           else "Lier avec un repo GitHub en ligne"))
-        print("    2. Nouveau repo GitHub")
-        print("    0. Retour")
-        choix = ask("Choix", "0")
-        if choix not in ("1", "2"):
+        choix = menu_numerote(choix_lien(cfg, chemin))
+        if not choix:
             return None
-        nouveau = choix == "2"
-        if not nouveau:
-            url = url_repo_en_ligne(cfg, ask("Repo en ligne : compte/nom ou URL",
-                                             meme["full_name"] if meme else ""))
+        nouveau = choix == "nouveau"
+        url = None if nouveau else adresse_du_choix(cfg, choix)
+        if not nouveau and not url:
+            return None
     if nouveau:
         defaut = re.sub(r"[^A-Za-z0-9._-]+", "-", os.path.basename(chemin)).strip("-")
         nom = ask("Nom du repo", defaut or "projet")
@@ -2527,6 +2564,27 @@ def lier_a_github(cfg, chemin, nouveau=False):
     else:
         git("remote", "add", "origin", url, cwd=chemin)
     return "origin"
+
+
+def choix_lien(cfg, chemin, suite=""):
+    """Choix pour lier un dossier : le repo du meme nom s'il existe, un autre
+    repo en ligne, ou un nouveau repo. Le repo nomme n'est jamais redemande."""
+    meme = repo_du_meme_nom(cfg, chemin)
+    choix = []
+    if meme:
+        choix.append((f"Lier avec {meme['full_name']}{suite}", meme))
+    choix.append((("Lier avec un autre repo GitHub en ligne" if meme
+                   else "Lier avec un repo GitHub en ligne") + suite, "autre"))
+    choix.append(("Nouveau repo GitHub", "nouveau"))
+    return choix
+
+
+def adresse_du_choix(cfg, choix):
+    """Adresse du repo choisi dans choix_lien, ou None pour revenir."""
+    if isinstance(choix, dict):
+        return choix.get("clone_url") or url_repo_en_ligne(cfg, choix["full_name"])
+    cible = ask("Repo en ligne : compte/nom ou URL, Enter pour revenir", "", obligatoire=False)
+    return url_repo_en_ligne(cfg, cible) if cible else None
 
 
 def creer_depot(cfg, nom, prive, org="", description=""):
@@ -2572,14 +2630,18 @@ def entete_projet(chemin):
     print(c(f"  Projet  : {chemin}", "1"))
     print(f"  Branche : {branche or 'HEAD hors branche'}     "
           f"Serveur : {url_web(url) or url or c('sans lien', '33')}")
-    etat = [f"{len(modifs)} fichier(s), commit manquant"]
+    # seulement ce qui differe : rien a 0, pour ne pas faire croire a un ecart
+    etat = [f"{len(modifs)} fichier(s), commit manquant"] if modifs else []
     if remote and branche:
         ar = avance_retard(chemin, remote, branche)
         if ar is None:
             etat.append("aucun push sur le serveur" if a_des_commits(chemin)
                         else "aucun commit")
         else:
-            etat += [f"push : {ar[0]} commit(s)", f"pull : {ar[1]} commit(s)"]
+            etat += [f"{action} : {n} commit(s)" for action, n in (("push", ar[0]), ("pull", ar[1])) if n]
+    if not etat:
+        etat = ["pareil en local et en ligne" if remote and branche
+                else "aucun changement depuis le dernier commit"]
     print("  Statut  : " + " | ".join(etat))
     op = operation_en_cours(chemin)
     if op:
@@ -2611,6 +2673,8 @@ def voir_commits_locaux(cfg, chemin):
     if not a_des_commits(chemin):
         info("Aucun commit dans ce repo.")
         return None
+    if remote and git("fetch", remote, cwd=chemin, quiet=True)[0] != 0:  # commits en ligne du moment
+        warn("Serveur injoignable : les commits en ligne datent du dernier fetch.")
     ref = f"{remote}/{branche}" if branche and remote else ""
     if ref and ref_existe(chemin, f"refs/remotes/{ref}"):
         ecart = False
@@ -2715,7 +2779,7 @@ def act_branches(cfg, chemin):
         pause()
 
 
-def parcourir_ref(chemin, ref):
+def parcourir_ref(chemin, ref, nom_branche=None):
     """Parcourir les fichiers d'une branche du repo local, sans changer de branche."""
     dossier = ""
     while True:
@@ -2727,7 +2791,8 @@ def parcourir_ref(chemin, ref):
             entrees.append((nom, meta.split()[1]))  # blob, tree ou commit pour un sous-repo
         entrees.sort(key=lambda e: (e[1] != "tree", e[0].lower()))
         print()
-        print(c(f"  Branche {ref} : /{dossier}", "1;36"))
+        print(c(f"  Branche {nom_branche or ref}" + (", en ligne" if nom_branche and nom_branche != ref else "")
+                + f" : /{dossier}", "1;36"))
         if dossier:
             print("      0. ..  dossier parent, ou Enter")
         for i, (nom, genre) in enumerate(entrees, 1):
@@ -2748,7 +2813,7 @@ def parcourir_ref(chemin, ref):
                 continue
             texte = contenu_en_ligne(chemin, ref, chemin_fichier)
             print()
-            print(c(f"  {chemin_fichier}, branche {ref}", "1"))
+            print(c(f"  {chemin_fichier}, branche {nom_branche or ref}", "1"))
             if texte is None:
                 info("Fichier binaire : pas d'affichage ici.")
             else:
@@ -2793,7 +2858,7 @@ def action_branche(cfg, chemin, remote, ici, branche, ou):
     locale = ou != "en ligne seulement"
     ref = branche if locale else f"{remote}/{branche}"
     if action == "parcourir":
-        parcourir_ref(chemin, ref)
+        parcourir_ref(chemin, ref, branche)
         return "retour"
     elif action == "commits":
         _, log, _ = git("log", "--format=%h  %ad  %an  %s", "--date=short", "-30", ref,
@@ -2842,7 +2907,9 @@ def action_branche(cfg, chemin, remote, ici, branche, ou):
                 err("Suppression impossible : " + expliquer(e))
                 return
             ok(f"Branche {branche} : suppression OK ici.")
-        if ou != "ici seulement" and ask_yn(f"Supprimer aussi la branche {branche} en ligne ?", False):
+        question = (f"Supprimer aussi la branche {branche} en ligne ?" if locale
+                    else f"Supprimer la branche {branche} en ligne ? Sans retour.")
+        if ou != "ici seulement" and ask_yn(question, False):
             code, _, e = git("push", remote, "--delete", branche, cwd=chemin, quiet=True)
             if code != 0:  # repli : l'API GitHub supprime la branche
                 _, o, r = infos_url(url_remote(remote, chemin))
@@ -2918,13 +2985,20 @@ def annuler_commit(cfg, chemin):
         return
     _, dernier, _ = git("log", "-1", "--format=%h  %s", cwd=chemin, quiet=True)
     info(f"Dernier commit : {dernier}")
-    en_ligne = git("merge-base", "--is-ancestor", "HEAD", "@{u}", cwd=chemin, quiet=True)[0] == 0
+    remote, branche = remote_principal(chemin), branche_courante(chemin)
+    distante = f"{remote}/{branche}" if remote and branche else "@{u}"
+    en_ligne = git("merge-base", "--is-ancestor", "HEAD", distante, cwd=chemin, quiet=True)[0] == 0
     if en_ligne:
         info("Ce commit est en ligne : un commit inverse efface ses changements ici, puis le")
         info("push le met en ligne, git revert. L'historique garde les deux commits.")
         if not ask_yn("Annuler ce commit, ici et en ligne ?", True):
             info("Abandon.")
             return
+        if git("diff", "--cached", "--quiet", cwd=chemin, quiet=True)[0] != 0:
+            # changements deja dans l'index (git add) : ils resteraient dans le commit
+            # d'annulation ; ils repassent en commit manquant, rien ne change sur le disque
+            info("Changements en cours : hors de l'annulation, ils restent sur cette machine.")
+            git("reset", "-q", cwd=chemin, quiet=True)
         fusion = git("rev-parse", "--verify", "-q", "HEAD^2", cwd=chemin, quiet=True)[0] == 0
         # un commit de fusion s'annule par rapport a sa premiere branche : -m 1
         code, _, e = git("revert", "--no-commit", *(["-m", "1"] if fusion else []), "HEAD",
@@ -2986,8 +3060,7 @@ def act_stash(cfg, chemin):
         if not choix:
             return "retour"
         if choix == "m" and modifs:
-            nom = ask("Nom de ces changements, Enter pour garder", "changements du "
-                      + datetime.now().strftime("%Y-%m-%d %H:%M"))
+            nom = ask("Nom de ces changements, Enter pour garder", "changements en cours")  # date : dans la liste
             code, _, e = git("stash", "push", "--include-untracked", "-m", nom, cwd=chemin, quiet=True)
             (ok("Rangement OK pour plus tard : le dossier revient au dernier commit.") if code == 0
              else err("Rangement impossible : " + expliquer(e)))
@@ -2996,7 +3069,7 @@ def act_stash(cfg, chemin):
             _, fichiers, _ = git("stash", "show", "--include-untracked", "--name-only", ref,
                                  cwd=chemin, quiet=True)
             print()
-            info(f"{nom}, {quand} :")
+            info(f"{quand}  {nom} :")
             for f in fichiers.splitlines()[:30]:
                 print("       " + f)
             print()
@@ -3102,31 +3175,25 @@ def menu_init(cfg, chemin):
     """Dossier sans git. Retourne True si un repo a ete cree."""
     titre("Nouveau projet git")
     info(f"{chemin} n'est pas un repo git.")
-    meme = repo_du_meme_nom(cfg, chemin)
-    if meme:
-        info(f"Repo en ligne avec ce nom : {meme['full_name']}")
     print()
-    print("    1. " + (f"Lier avec {meme['full_name']}, puis pull" if meme
-                       else "Lier avec un repo GitHub en ligne, puis pull"))
-    print("    2. git init, nouveau repo GitHub, premier commit et push")
-    print("    3. git init seulement")
-    print("    0. Retour")
-    choix = ask("Choix", "0")
-    if choix == "1":
+    choix = choix_lien(cfg, chemin, ", puis pull")
+    choix[-1] = ("git init, nouveau repo GitHub, premier commit et push", "nouveau")
+    choix.append(("git init seulement", "init"))
+    choix = menu_numerote(choix)
+    if not choix:
+        return False
+    if choix not in ("nouveau", "init"):
         if not assurer_connexion(cfg):
             return False
-        cible = ask("Repo en ligne : compte/nom ou URL", meme["full_name"] if meme else "")
-        executer(lier_et_recevoir, cfg, chemin, url_repo_en_ligne(cfg, cible))
+        url = adresse_du_choix(cfg, choix)
+        if not url:
+            return False
+        executer(lier_et_recevoir, cfg, chemin, url)
         pause()
         return racine_repo(chemin) is not None
-    if choix not in ("2", "3"):
-        return False
     init_depot(chemin)
-    gi = Path(chemin) / ".gitignore"
-    if not gi.exists() and ask_yn("Ajouter un .gitignore standard pour Python et Node ?", True):
-        gi.write_text(GITIGNORE, encoding="utf-8")
-        ok("Nouveau .gitignore")
-    if choix == "2" and lier_a_github(cfg, chemin, nouveau=True):
+    gitignore_standard(cfg, chemin)
+    if choix == "nouveau" and lier_a_github(cfg, chemin, nouveau=True):
         executer(act_commit_push, cfg, chemin)
         pause()
     return True
@@ -3137,8 +3204,7 @@ def repo_du_meme_nom(cfg, chemin):
     if not SESSION["token"]:
         return None
     nom = os.path.basename(os.path.normpath(chemin)).lower()
-    repos = api_liste(cfg, "/user/repos?per_page=100"
-                           "&affiliation=owner,collaborator,organization_member") or []
+    repos = liste_repos(cfg) or []
     return next((d for d in repos if (d.get("name") or "").lower() == nom), None)
 
 
@@ -3176,10 +3242,17 @@ def lier_et_recevoir(cfg, chemin, url):
     git("symbolic-ref", "HEAD", f"refs/heads/{branche}", cwd=chemin, quiet=True)
     git("reset", "--mixed", "--quiet", ref, cwd=chemin)
     git("branch", "--set-upstream-to", ref, branche, cwd=chemin, quiet=True)
+    absents = sum(1 for l in fichiers_modifies(chemin) if l.startswith(" D"))
+    if absents:
+        # fichiers en ligne absents du dossier : ils arrivent, rien ne se perd ;
+        # sans -f, les fichiers deja la ne bougent pas
+        git("checkout-index", "--all", cwd=chemin, quiet=True)
     modifs = fichiers_modifies(chemin)
     suivis = [l for l in modifs if not l.startswith("??")]
     nouveaux = len(modifs) - len(suivis)
     print()
+    if absents:
+        ok(f"Pull OK : {absents} fichier(s) de la version en ligne dans ce dossier.")
     if not suivis:
         ok("Ce dossier et la version en ligne sont pareils.")
     else:
@@ -3194,7 +3267,7 @@ def lier_et_recevoir(cfg, chemin, url):
         if ask("Choix", "1") == "1":
             git("stash", "push", "-m", "gitmanager : fichiers avant le pull", cwd=chemin)
             ok("Version en ligne OK dans ce dossier.")
-            info("Fichiers d'avant dans git stash : git stash pop pour les reprendre.")
+            info("Fichiers d'avant : choix 6 du repo, Changements pour plus tard, pour les reprendre.")
         else:
             info("Les fichiers de ce dossier restent, commit manquant.")
     if nouveaux:
@@ -3316,8 +3389,8 @@ def ouvrir_dossier(cfg, chemin):
 
 
 def act_autre_dossier(cfg):
-    titre("Envoyer un dossier sur GitHub")
-    chemin = choisir_dossier(cfg, "Dossier pour l'envoi, ou repo hors liste")
+    titre("Ouvrir un autre dossier")
+    chemin = choisir_dossier(cfg, "Dossier : repo hors liste, ou dossier pour l'envoi sur GitHub")
     if chemin:
         ouvrir_dossier(cfg, chemin)
 
@@ -3331,22 +3404,25 @@ def act_depots_locaux(cfg):
 def liste_depots_locaux(cfg):
     titre("Repos GitHub en local")
     info("Recherche des repos git sur cette machine...")
-    projets = projets_de_la_machine(cfg)[:30]
+    tous = projets_de_la_machine(cfg)
+    projets = tous[:30]
     print()
     if not projets:
         info("Aucun repo git sur cette machine.")
-        if ask_yn("Envoyer un dossier sur GitHub ?", True):
-            act_autre_dossier(cfg)
-        return "retour"
-    print(c(f"    {'#':>3}  {'Repo':<44} {'Commit manquant':>15}  GitHub", "1"))
-    for i, (p, (url, modifs, _)) in enumerate(zip(projets, apercu_projets(projets)), 1):
-        nom = nom_court(p)
-        nom = nom if len(nom) <= 44 else "~" + nom[-43:]
-        print(f"    {i:>3}. {nom:<44} {modifs:>15}  {lien_court(url)}")
+    else:
+        print(c(f"    {'#':>3}  {'Repo':<44} {'Commit manquant':>15}  GitHub", "1"))
+        for i, (p, (url, modifs, _)) in enumerate(zip(projets, apercu_projets(projets)), 1):
+            nom = nom_court(p)
+            nom = nom if len(nom) <= 44 else "~" + nom[-43:]
+            print(f"    {i:>3}. {nom:<44} {modifs:>15}  {lien_court(url)}")
+        if len(tous) > len(projets):
+            info(f"... et {len(tous) - len(projets)} autre(s), moins recents : N pour en ouvrir un.")
     print()
-    print("      N. Envoyer un autre dossier sur GitHub")
+    print("      N. Ouvrir un autre dossier : repo hors liste, ou envoi sur GitHub")
     print("      T. Tous les repos d'un dossier : push ou pull")
-    choix = ask("Choix : # du repo, N ou T, Enter pour revenir", "", obligatoire=False).lower()
+    print("      U. Cloner un repo par son URL : git clone")
+    choix = ask("Choix : " + ("# du repo, " if projets else "") + "N, T ou U, Enter pour revenir",
+                "", obligatoire=False).lower()
     if not choix:
         return "retour"
     if choix.isdigit() and 1 <= int(choix) <= len(projets):
@@ -3356,6 +3432,8 @@ def liste_depots_locaux(cfg):
     elif choix == "t":
         executer(act_tout, cfg)
         pause()
+    elif choix == "u":
+        cloner_par_url(cfg)
     else:
         warn("Choix invalide.")
 
@@ -3391,10 +3469,11 @@ def act_tout(cfg):
     bilan = {}
     for i, p in enumerate(projets, 1):
         nom = os.path.relpath(p, dossier) if p != dossier else os.path.basename(p)
-        print(f"  [{i}/{len(projets)}] {nom}...", end="\r", flush=True)
+        # une ligne par repo : les commandes git s'affichent dessous, sans s'y melanger
+        print(c(f"  [{i}/{len(projets)}] {nom}", "1"))
         statut, detail = synchroniser(cfg, p, message=message, envoyer=(mode == "1"))
-        print(" " * 70, end="\r")
         afficher_resultat(statut, detail, nom[:28])
+        print()
         bilan[statut] = bilan.get(statut, 0) + 1
     print()
     resume = {"ok": "OK", "a_jour": "sans rien de nouveau", "conflit": "en conflit",
@@ -3416,8 +3495,7 @@ def act_depots(cfg):
         # relue a chaque affichage : un repo ou une permission ajoutes au jeton
         # sur GitHub apparaissent sans reconnexion
         info("Chargement de la liste...")
-        repos = api_liste(cfg, "/user/repos?per_page=100&sort=pushed"
-                                "&affiliation=owner,collaborator,organization_member")
+        repos = liste_repos(cfg, tri="pushed")
         if repos is None:
             return
         vue = [d for d in repos if filtre.lower() in d["full_name"].lower()]
@@ -3426,37 +3504,26 @@ def act_depots(cfg):
         print()
         entete = f"{len(vue)} repo(s)" + (f" contenant '{filtre}'" if filtre else "")
         print(c(f"    {entete}", "1"))
-        print(c(f"    {'#':>3}  {'Repo':<42} {'Public':<7} {'Envoi':<10}  En local", "1"))
+        print(c(f"    {'#':>3}  {'Repo':<42} {'Public':<7} {'Dernier push':<12}  En local", "1"))
         for i, d in enumerate(vue, 1):
             nom = d["full_name"] if len(d["full_name"]) <= 42 else d["full_name"][:41] + "~"
             vis = "non" if d.get("private") else "oui"
             date = (d.get("pushed_at") or d.get("updated_at") or "")[:10]
             loc = "oui" if d["full_name"].lower() in locaux else ""
-            print(f"    {i:>3}. {nom:<42} {vis:<7} {date:<10}  {loc}")
-        print()
-        print("      U. Cloner un repo par son URL")
-        print("      C. Changer de compte")
-        print("      D. Fermer la session")
+            print(f"    {i:>3}. {nom:<42} {vis:<7} {date:<12}  {loc}")
         print()
         retour = "Enter pour toute la liste" if filtre else "Enter pour revenir"
-        choix = ask(f"Choix : # du repo, lettre, ou mot pour chercher, {retour}",
-                    "", obligatoire=False)
+        choix = ask(f"Choix : # du repo, ou mot pour chercher, {retour}", "", obligatoire=False)
         if not choix:
             if not filtre:
                 return
             filtre = ""
         elif choix.isdigit() and 1 <= int(choix) <= len(vue):
             menu_depot(cfg, vue[int(choix) - 1], locaux)
-        elif choix.lower() == "u":
-            cloner_par_url(cfg)
-        elif choix.lower() == "c":
-            changer_compte(cfg)
-            filtre = ""
-            pause()
-        elif choix.lower() == "d":
-            if deconnexion(cfg):
-                pause()
+            if NAVIGATION["menu_principal"]:
                 return
+        elif choix.isdigit() and not any(choix in d["full_name"] for d in repos):
+            warn(f"Choix invalide : numero de 1 a {len(vue)}.")  # pas une recherche vide
         else:
             filtre = choix
 
@@ -3519,7 +3586,7 @@ def menu_depot(cfg, d, locaux):
             info(d["description"])
         info(d["html_url"])
         info(f"Branche principale : {d.get('default_branch') or '-'}    "
-             f"Dernier envoi : {(d.get('pushed_at') or '-')[:10]}")
+             f"Dernier push : {(d.get('pushed_at') or '-')[:10]}")
         info(f"Copie sur cette machine : {local or 'aucune'}")
         print()
         print("    1. Parcourir les fichiers")
@@ -3560,7 +3627,7 @@ def menu_depot(cfg, d, locaux):
             afficher_acces(cfg, d)
             pause()
         elif choix == "8":
-            if supprimer_depot(cfg, d):
+            if supprimer_depot(cfg, d, locaux):
                 pause()
                 return "supprime"
             pause()
@@ -4058,7 +4125,12 @@ def details_commit(cfg, full, sha):
 
 def cloner(cfg, d):
     defaut = cfg.get("espace") or os.getcwd()
-    parent = nettoyer_chemin(ask("Cloner dans le dossier", defaut))
+    saisie = ask("Cloner dans le dossier, 0 pour revenir", defaut, obligatoire=False)
+    if saisie in ("", "0"):
+        return None
+    parent = nettoyer_chemin(saisie)
+    if not os.path.isdir(parent) and not ask_yn(f"Dossier introuvable : {parent}. Le creer ?", True):
+        return None
     dest = os.path.join(parent, d["name"])
     if os.path.exists(dest) and (not os.path.isdir(dest) or os.listdir(dest)):
         if os.path.isdir(dest) and ask_yn(f"{dest} existe : le lier avec {d['full_name']}, "
@@ -4133,23 +4205,104 @@ def changer_visibilite(cfg, d):
         err(f"Erreur, code {code} : {message_api(rep)}")
 
 
-def supprimer_depot(cfg, d):
-    warn("Suppression SANS RETOUR sur GitHub : code, issues et historique.")
-    info("Les copies sur cette machine restent.")
-    if ask(f"Taper '{d['name']}' pour confirmer", "", obligatoire=False) != d["name"]:
-        info("Abandon.")
+def supprimer_depot(cfg, d, locaux=None):
+    """Supprime le repo de GitHub, depuis le terminal. La permission de suppression
+    manque souvent a la connexion : GitHub CLI la demande dans le navigateur, ou un
+    jeton sert pour cette suppression seulement. Retourne True si c'est fait."""
+    full = d["full_name"]
+    if (d.get("permissions") or {}).get("admin") is False:
+        err(f"Suppression impossible : il faut le role admin sur {full}.")
+        info("Seul un admin du repo peut le supprimer : son proprietaire, ou un admin")
+        info("de l'organisation. Voir les droits sur ce repo : choix 7.")
         return False
-    code, rep, _ = api(cfg, "DELETE", f"/repos/{d['full_name']}")
+    warn("Suppression SANS RETOUR sur GitHub : code, issues, pull requests et historique.")
+    confirme = ask(f"Taper {d['name']} pour confirmer, Enter pour annuler", "", obligatoire=False)
+    if confirme.strip().lower() not in (d["name"].lower(), full.lower()):
+        info("Abandon : le repo reste sur GitHub.")
+        return False
+    if not supprimer_sur_github(cfg, d):
+        return False
+    SUPPRIMES.add(full.lower())
+    ok(f"{full} : suppression OK sur GitHub.")
+    local = (locaux or {}).get(full.lower())
+    if local and os.path.isdir(local):
+        copie_apres_suppression(local, full, locaux)
+    return True
+
+
+def supprimer_sur_github(cfg, d):
+    """DELETE /repos/... ; sans la permission de supprimer, la demande a GitHub
+    CLI, puis propose un jeton pour cette fois ou la page du repo."""
+    full = d["full_name"]
+    if not assurer_connexion(cfg):
+        return False
+    code, rep, hdr = requete(cfg, "DELETE", f"/repos/{full}")
+    if code == 401 and rafraichir_session(cfg):
+        code, rep, hdr = requete(cfg, "DELETE", f"/repos/{full}")
     if code == 204:
-        ok(f"{d['full_name']} : suppression OK.")
         return True
-    if code == 403:
-        warn("Cette connexion n'a pas le droit de supprimer des repos.")
-        info("La page Settings du repo s'ouvre : tout en bas, 'Delete this repository'.")
-        webbrowser.open(d["html_url"] + "/settings")
+    if code not in (403, 404):
+        err(f"Suppression impossible, code {code or 'aucun'} : {message_api(rep)}")
         return False
-    err(f"Erreur, code {code} : {message_api(rep)}")
+    if DEBUG:
+        err(f"GitHub : {rep.get('message') if isinstance(rep, dict) else rep}")
+    print()
+    warn("GitHub refuse : la connexion n'a pas la permission de supprimer des repos.")
+    if SESSION["methode"] == "gh" and chemin_gh():
+        info("GitHub CLI peut ajouter la permission delete_repo, dans le navigateur.")
+        if ask_yn("La demander maintenant ?", True) and gh_par_navigateur(
+                ["auth", "refresh", "-h", host(cfg), "-s", "delete_repo"]) == 0:
+            SESSION["token"] = token_silencieux(cfg, "gh") or SESSION["token"]
+            code, rep, _ = requete(cfg, "DELETE", f"/repos/{full}")
+            if code == 204:
+                return True
+            warn("Toujours refuse : l'organisation interdit peut-etre la suppression des repos.")
+    elif SESSION["methode"] == "gcm":
+        info("Git Credential Manager ne donne pas cette permission.")
+    print()
+    print("    1. Saisir un jeton avec la permission de supprimer, pour cette fois seulement")
+    print("    2. Ouvrir la page du repo sur GitHub : Settings, tout en bas, Delete this repository")
+    print("    0. Annuler")
+    choix = ask("Choix", "0")
+    if choix == "1":
+        info(f"Faire un jeton sur https://{host(cfg)}/settings/tokens : jeton classique avec")
+        info("delete_repo, ou jeton fin pour ce repo avec Administration, Read and write.")
+        info("Il sert pour cette suppression seulement, puis le programme l'oublie.")
+        _, jeton = demander_secret(host(cfg), aide=False)
+        if jeton:
+            code, rep, _ = requete(cfg, "DELETE", f"/repos/{full}", token=jeton)
+            jeton = None
+            if code == 204:
+                return True
+            err(f"Suppression impossible avec ce jeton, code {code or 'aucun'} : {message_api(rep)}")
+    elif choix == "2":
+        ouvrir_navigateur(d.get("html_url", f"https://{host(cfg)}/{full}") + "/settings")
+    info("Abandon : le repo reste sur GitHub.")
     return False
+
+
+def copie_apres_suppression(local, full, locaux):
+    """Copie sur cette machine d'un repo supprime de GitHub : c'est maintenant la
+    derniere copie. Elle reste, sans lien vers le repo supprime, ou part aussi."""
+    print()
+    info(f"Copie sur cette machine : {local}")
+    info("C'est maintenant la seule copie de ce projet.")
+    print("    1. La garder, sans lien avec le repo supprime : git remote remove")
+    print("    2. La supprimer aussi de cette machine")
+    if ask("Choix", "1") == "2" and ask_yn(f"Supprimer {local} ? Sans retour, c'est la derniere "
+                                           "copie.", False):
+        supprimer_dossier(local)
+        if os.path.exists(local):
+            err("Suppression pas finie : fermer les programmes qui ouvrent ce dossier.")
+        else:
+            ok(f"{local} : suppression OK.")
+            locaux.pop(full.lower(), None)
+            return
+    for remote, url in urls_remotes(local).items():
+        if cle_depot(url) == full.lower():
+            git("remote", "remove", remote, cwd=local)
+    locaux.pop(full.lower(), None)
+    ok("Copie gardee, sans lien avec GitHub : Lier avec GitHub la remet en ligne.")
 
 
 def afficher_permissions(cfg):
@@ -4167,8 +4320,7 @@ def afficher_permissions(cfg):
     expiration = hdr.get("GitHub-Authentication-Token-Expiration")
     if expiration:
         info(f"Expiration du jeton : {expiration}")
-    repos = api_liste(cfg, "/user/repos?per_page=100"
-                           "&affiliation=owner,collaborator,organization_member")
+    repos = liste_repos(cfg)
     if repos is not None:
         ecriture = sum(1 for r in repos if (r.get("permissions") or {}).get("push"))
         info(f"Repos ouverts pour ce compte : {len(repos)}, dont {ecriture} avec droit de push.")
@@ -4195,15 +4347,17 @@ def act_compte(cfg):
                    ("Voir les permissions de la connexion", afficher_permissions)]
         if cles:
             actions.append(("Temps de garde du compte sur cette machine", choisir_garde))
-        actions.append(("Fermer la session", deconnexion))
+        # Fermer la session : choix 4 du menu d'avant, pas de doublon ici
     else:
         actions = [("Se connecter", connexion_interactive),
                    ("Changer de serveur GitHub, par exemple GitHub Enterprise", changer_serveur)]
         if traces_compte(cfg):
             actions.append(("Supprimer les identifiants de cette machine", act_supprimer_compte))
     fn = menu_numerote(actions)
-    if fn:
-        fn(cfg)
+    if not fn:
+        return "retour"
+    fn(cfg)
+    return None
 
 
 # Ordinateur entreprise : repo recupere depuis GitHub -> repo de l'entreprise
@@ -4215,6 +4369,12 @@ def verifier_url(url):
     if re.match(r"^(http|git)://", url, re.I):
         raise Arret("erreur", "adresse sans chiffrement : utiliser https:// ou SSH")
     return sans_identifiants(url)
+
+
+def ressemble_a_un_dossier(saisie):
+    """Saisie qui designe un dossier de cette machine, pas une adresse en ligne."""
+    s = saisie.strip().strip('"').strip("'")
+    return s.startswith(("/", "~", ".", "\\", "$", "%")) or bool(re.match(r"^[A-Za-z]:[\\/]", s))
 
 
 def url_source(saisie):
@@ -4608,9 +4768,17 @@ def import_prive(cfg, url, dossier):
 def importer_repo(cfg, dossier):
     """Import d'un repo GitHub par son URL, sans identifiants s'il est public.
     Retourne (dossier du projet importe, nom du repo)."""
-    saisie = ask("Repo pour l'import : URL GitHub, compte/nom ou dossier sur cette machine, "
-                 "Enter pour revenir", obligatoire=False)
-    if not saisie:
+    for essai in range(1, 6):
+        saisie = ask("Repo pour l'import : URL GitHub, compte/nom ou dossier sur cette machine, "
+                     "Enter pour revenir", obligatoire=False)
+        if not saisie:
+            return None, None
+        chemin = nettoyer_chemin(saisie)
+        if not (ressemble_a_un_dossier(saisie) and not os.path.isdir(chemin)):
+            break
+        err(f"Dossier introuvable : {chemin}" + (f", essai {essai} sur 5." if essai < 5 else "."))
+    else:
+        info("5 essais sans dossier : retour.")
         return None, None
     url = url_source(saisie)
     if os.path.isdir(url):  # dossier de cette machine : aucune connexion
@@ -4689,8 +4857,7 @@ def envoyer_vers_entreprise(cfg, source):
     menu precedent."""
     titre("Envoyer dans un repo GitHub de l'entreprise")
     info("Chargement des repos du compte GitHub de l'entreprise...")
-    repos = api_liste(cfg, "/user/repos?per_page=100&sort=pushed"
-                           "&affiliation=owner,collaborator,organization_member") or []
+    repos = liste_repos(cfg, tri="pushed") or []
     print()
     if repos:
         print(c(f"    {'#':>3}  {'Repo':<44} Droits", "1"))
@@ -4861,8 +5028,9 @@ def afficher_accueil():
 
 
 def lancer(fn, cfg, avec_pause=True):
+    res = None
     try:
-        executer(fn, cfg)
+        res = executer(fn, cfg)
     except KeyboardInterrupt:
         print()
         warn("Interruption.")
@@ -4870,7 +5038,7 @@ def lancer(fn, cfg, avec_pause=True):
         err("Erreur inattendue dans le programme : relancer l'action.")
         if DEBUG:
             err(f"{type(e).__name__} : {e}")
-    if avec_pause:
+    if avec_pause and res != "retour":  # Retour : rien a lire, pas de pause
         pause()
 
 

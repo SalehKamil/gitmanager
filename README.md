@@ -73,7 +73,8 @@ le programme s'affiche en français : les messages en anglais de Git, de GitHub
 CLI, des installateurs et de GitHub sont traduits ou cachés.
 
 Dans chaque menu, Enter revient en arrière d'un niveau ; au menu principal,
-Enter quitte le programme.
+Enter quitte le programme. Quand une valeur est proposée entre crochets,
+Enter la garde et 0 revient en arrière.
 
 ### Option 1 : gérer les repos GitHub
 
@@ -97,14 +98,20 @@ compte le remplace.
      la plus neuve en vert ; puis les deux versions d'un fichier, côte à
      côte. Sans différence, une seule ligne le dit.
    - Voir les droits sur ce repo : le rôle du compte et ses droits.
-   - Supprimer de GitHub.
-   - U : cloner un repo par son URL ou compte/nom, même hors de la liste.
-   - C : changer de compte.
-   - D : fermer la session, en gardant ou en supprimant le compte.
+   - Supprimer de GitHub, depuis le terminal : il faut le rôle admin. Si
+     la connexion n'a pas la permission de supprimer, GitHub CLI la demande
+     dans le navigateur ; sinon un jeton sert pour cette suppression
+     seulement. Le repo supprimé ne s'affiche plus dans la liste. Sa copie
+     sur la machine reste, sans lien avec le repo supprimé, ou part aussi,
+     au choix.
+   - Un numéro hors de la liste est refusé ; un mot cherche dans les noms.
 2. Repos GitHub en local : la liste des repos trouvés sur la machine ; le
    numéro d'un repo ouvre son menu, avec tous ses choix sur un seul écran.
+   - Statut du repo : seulement ce qui diffère, fichiers au commit
+     manquant, push ou pull à faire ; sinon, pareil en local et en ligne.
    - 1 Envoyer : commit + push ; le programme demande le message du commit,
-     Enter garde le message proposé.
+     Enter garde le message proposé. Sans `.gitignore`, il en propose un,
+     une fois par dossier.
    - 2 Recevoir : pull.
    - 3 Voir les changements : voir les commits, ou voir les différences en
      local et en ligne. Les commits en avance d'un côté s'affichent
@@ -113,7 +120,9 @@ compte le remplace.
      passer dessus, en faire une nouvelle, la fusionner dans la branche
      actuelle, la supprimer ici ou en ligne.
    - 5 Annuler un commit ou des changements : les changements d'un
-     fichier, ou le dernier commit, ici et en ligne en une seule action.
+     fichier, ou le dernier commit, ici et en ligne en une seule action,
+     `git revert` puis `git push` ; le travail en cours reste sur la
+     machine, hors de l'annulation.
    - 6 Changements pour plus tard : `git stash` range les changements pas
      encore en commit, pour les reprendre plus tard ou les supprimer.
    - 7 Ouvrir la copie sur cette machine : le dossier dans le gestionnaire
@@ -123,27 +132,38 @@ compte le remplace.
    - 10 Rendre public ou non public.
    - 11 Lier avec un autre repo GitHub.
    - 12 Supprimer le `.git` de ce dossier.
-   - N : envoyer un dossier sans repo local, ou un nouveau projet ; le
-     programme demande le nom, la description et si le repo est public.
+   - N : ouvrir un autre dossier, repo hors de la liste, dossier sans repo
+     local ou nouveau projet ; le programme demande le nom, la description
+     et si le repo est public.
    - T : tous les repos d'un dossier, push ou pull de chacun en une fois.
+   - U : cloner un repo par son URL ou compte/nom, même hors de la liste,
+     `git clone`.
+   - Plus de 30 repos : les plus récents s'affichent, une ligne compte les
+     autres ; N les ouvre.
    - Dossier introuvable : le programme le redemande, cinq essais en tout,
      puis revient d'un niveau.
    - Dossier sans git, ou au `.git` illisible : le programme propose de le
-     lier avec un repo GitHub en ligne, celui du même nom s'il existe, puis
-     de faire un pull ; ou de créer un nouveau repo GitHub. Les fichiers du
-     dossier qui ne sont pas comme la version en ligne partent dans
+     lier avec le repo GitHub du même nom s'il existe, avec un autre repo
+     en ligne, puis de faire un pull ; ou de créer un nouveau repo GitHub.
+     Le repo choisi n'est jamais redemandé. Les fichiers absents du dossier
+     arrivent ; ceux qui ne sont pas comme la version en ligne partent dans
      `git stash`, ou restent, au choix.
    - Repo git dans un autre repo : avant le commit, le programme le signale
      et propose de le laisser hors du commit, dans le `.gitignore`. Sans
      ce choix, GitHub montre un dossier vide à sa place. La comparaison en
      ligne et en local le laisse de côté.
+3. Compte GitHub : moyen de connexion, changer de compte, serveur GitHub,
+   permissions de la connexion, temps de garde du compte sur la machine.
+4. Fermer la session, en gardant ou en supprimant le compte de la machine.
+5. Supprimer les identifiants de cette machine, quand il y en a.
 
 ### Option 2 : entreprise
 
 Connexion au compte GitHub de l'entreprise.
 
 1. Importer un repo GitHub : saisir son URL, compte/nom, ou un dossier de la
-   machine. Un repo public s'importe sans connexion.
+   machine. Un repo public s'importe sans connexion. Dossier introuvable :
+   cinq essais, puis retour d'un niveau.
    - Copie du repo sur la machine : le programme la trouve et propose de
      l'utiliser, sans connexion au compte perso ; seul son dernier commit
      part, les fichiers au commit manquant restent.
@@ -163,6 +183,17 @@ Connexion au compte GitHub de l'entreprise.
      Windows, macOS ou Linux. La copie reste après l'envoi.
 2. Repos GitHub de l'entreprise : les mêmes choix que l'option 1, avec le
    compte de l'entreprise.
+
+## Essais
+
+Les essais tournent sans réseau : de vrais repos git sur la machine, à la
+place de GitHub, et un faux GitHub pour l'API.
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Avec `GM_VOIR=1`, les écrans du programme s'affichent aussi.
 
 ## Sécurité
 
