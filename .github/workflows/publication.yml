@@ -1,0 +1,99 @@
+name: Publication
+
+# A chaque push sur main dont la version de Cargo.toml n'a pas encore de
+# publication : les executables pour Windows, macOS et Linux, publies dans une
+# version GitHub, avec leurs empreintes SHA-256. GitHub cree lui-meme l'etiquette.
+on:
+  push:
+    branches: [main]
+    paths: ["Cargo.toml", "Cargo.lock", "src/**", ".github/workflows/publication.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      nouvelle: ${{ steps.v.outputs.nouvelle }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "nouvelle=non" >> "$GITHUB_OUTPUT"
+          else
+            echo "nouvelle=oui" >> "$GITHUB_OUTPUT"
+          fi
+
+  construire:
+    needs: version
+    if: needs.version.outputs.nouvelle == 'oui'
+    name: ${{ matrix.fichier }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            cible: x86_64-unknown-linux-musl
+            fichier: gitmanager-linux-x86_64
+          - os: macos-latest
+            cible: aarch64-apple-darwin
+            fichier: gitmanager-macos-arm64
+          - os: macos-latest
+            cible: x86_64-apple-darwin
+            fichier: gitmanager-macos-x86_64
+          - os: windows-latest
+            cible: x86_64-pc-windows-msvc
+            fichier: gitmanager-windows-x86_64.exe
+    steps:
+      - uses: actions/checkout@v5
+      - name: Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add ${{ matrix.cible }}
+      - name: musl
+        if: contains(matrix.cible, 'musl')
+        run: sudo apt-get update -q && sudo apt-get install -y -q musl-tools
+      - name: Construction
+        run: cargo build --release --locked --target ${{ matrix.cible }}
+      - name: Executable
+        shell: bash
+        run: |
+          mkdir -p sortie
+          src="target/${{ matrix.cible }}/release/gitmanager"
+          if [ -f "$src.exe" ]; then src="$src.exe"; fi
+          cp "$src" "sortie/${{ matrix.fichier }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.fichier }}
+          path: sortie/${{ matrix.fichier }}
+
+  publier:
+    needs: [version, construire]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: sortie
+          merge-multiple: true
+      - name: Version GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cd sortie
+          sha256sum gitmanager-* > SHA256SUMS
+          cat SHA256SUMS
+          gh release create "v$VERSION" gitmanager-* SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "gitmanager $VERSION" \
+            --notes "Installation : voir le README. Empreintes SHA-256 dans SHA256SUMS."
