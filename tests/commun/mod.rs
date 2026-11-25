@@ -133,7 +133,9 @@ pub struct Banc {
 impl Banc {
     pub fn new() -> Banc {
         let tmp_dir = tempfile::Builder::new().prefix("gm-essai-").tempdir().unwrap();
-        let tmp = tmp_dir.path().canonicalize().unwrap();
+        // chemin reel (macOS : /private/var), sans la forme \\?\ de Windows, que Git ne lit pas
+        let reel = tmp_dir.path().canonicalize().unwrap().display().to_string();
+        let tmp = PathBuf::from(reel.strip_prefix(r"\\?\").unwrap_or(&reel));
         let (maison, distants) = (tmp.join("maison"), tmp.join("github"));
         let espace = maison.join("projets");
         for d in [&maison, &espace, &distants.join("saleh")] {
