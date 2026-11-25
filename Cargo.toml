@@ -1,0 +1,34 @@
+[package]
+name = "gitmanager"
+version = "3.0.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Coder a la maison, pousser au bureau, gerer les repos GitHub en local comme en ligne."
+license = "MIT"
+repository = "https://github.com/SalehKamil/gitmanager"
+readme = "README.md"
+
+[dependencies]
+ureq = { version = "3.5", features = ["platform-verifier", "win-system-proxy"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+regex = "1"
+similar = "3"
+rpassword = "7"
+sha2 = "0.11"
+base64 = "0.23"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+terminal_size = "0.4"
+tempfile = "3"
+ctrlc = "3"
+open = "5"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+
+[dev-dependencies]
+tiny_http = "0.12"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
