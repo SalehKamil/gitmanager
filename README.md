@@ -44,11 +44,12 @@ principal.
 
 La connexion propose deux moyens :
 
-1. Se connecter sur le navigateur : le compte reste sur la machine pour un
-   temps au choix, cette session, 8 heures, 7 jours, 30 jours ou toujours. À
-   la fin du temps, le compte est supprimé. Avec GitHub CLI 2.103
-   ou plus, le jeton expire au bout de quelques heures et GitHub CLI le
-   renouvelle seul.
+1. Se connecter sur le navigateur : le programme affiche un code à
+   copier, puis ouvre le navigateur après Enter. Le compte reste sur la
+   machine pour un temps au choix, cette session, 8 heures, 7 jours, 30
+   jours ou toujours. À la fin du temps, le compte est supprimé. Avec
+   GitHub CLI 2.103 ou plus, le jeton expire au bout de quelques heures et
+   GitHub CLI le renouvelle seul.
 2. Saisir un jeton : la connexion reste dans la session, jamais sur le
    disque.
 
@@ -65,8 +66,9 @@ Le menu principal propose aussi, sous les deux options :
 Les identifiants gardés sur la machine se gèrent seulement dans les menus des
 repos GitHub, perso ou de l'entreprise, avec une session ouverte.
 
-Chaque commande Git qui change un repo s'affiche, avec son résultat en
-français : `git add`, `git commit`, `git push`, `git pull` et les autres. Tout
+Chaque commande Git qui change un repo s'affiche, l'action Git en rouge,
+avec son résultat en français : `git add`, `git commit`, `git push`,
+`git pull` et les autres. Tout
 le programme s'affiche en français : les messages en anglais de Git, de GitHub
 CLI, des installateurs et de GitHub sont traduits ou cachés.
 
@@ -75,66 +77,63 @@ Enter quitte le programme.
 
 ### Option 1 : repos GitHub perso
 
-Connexion au compte GitHub perso.
+Connexion au compte GitHub perso. Le titre du menu porte le nom du compte
+connecté, par exemple Repos GitHub de Saleh Kamil.
 
 1. Repos GitHub en ligne : la liste des repos sur GitHub, avec une
    recherche par nom ; le numéro d'un repo l'ouvre.
-   - Parcourir les fichiers et voir les commits.
+   - Parcourir les fichiers : d'abord le choix de la branche.
+   - Voir les commits : d'abord le choix de la branche.
    - Rendre public ou non public.
    - Ouvrir la copie sur cette machine : le dossier s'ouvre dans le
      gestionnaire de fichiers du système et son menu dans le terminal.
    - Cloner le projet en local, quand aucune copie n'existe. Si le dossier
      existe déjà, le programme propose de le lier avec le repo, puis pull.
    - Ouvrir la copie en ligne : la page du repo dans le navigateur.
-   - Comparer en ligne et en local : un tableau à deux colonnes, en ligne et
-     en local, avec la date du dernier commit, la copie la plus neuve, les
-     commits en avance, les fichiers et leur taille ; puis les fichiers avec
-     changements, la version la plus neuve en vert ; puis les deux versions
-     d'un fichier, côte à côte.
+   - Comparer en ligne et en local : seulement les différences, avec la
+     même branche en ligne ; puis les fichiers avec changements, la version
+     la plus neuve en vert ; puis les deux versions d'un fichier, côte à
+     côte. Sans différence, une seule ligne le dit.
    - Voir les droits sur ce repo : le rôle du compte et ses droits.
    - Supprimer de GitHub.
    - U : cloner un repo par son URL ou compte/nom, même hors de la liste.
    - C : changer de compte.
    - D : fermer la session, en gardant ou en supprimant le compte.
-2. Repos GitHub en local : la liste des repos trouvés sur la machine.
-   - Envoyer : commit + push ; le programme demande le message du commit,
+2. Repos GitHub en local : la liste des repos trouvés sur la machine ; le
+   numéro d'un repo ouvre son menu, avec tous ses choix sur un seul écran.
+   - 1 Envoyer : commit + push ; le programme demande le message du commit,
      Enter garde le message proposé.
-   - Recevoir : pull.
-   - Voir les changements : les fichiers au commit manquant ; le numéro
-     d'un fichier montre sa version du dernier commit et celle de la
-     machine, côte à côte.
-   - Comparer en ligne et en local : le même tableau que pour un repo en
-     ligne.
-   - Branches : passer sur une branche, en faire une nouvelle, fusionner une
-     branche dans la branche actuelle, supprimer une branche ici ou en
-     ligne.
-   - Annuler un commit ou des changements : les changements d'un fichier,
-     ou le dernier commit. Un commit déjà en ligne est compensé par un
-     commit inverse, `git revert`.
-   - Ouvrir la copie sur cette machine : le dossier dans le gestionnaire de
-     fichiers du système.
-   - Ouvrir la copie en ligne : la page du repo dans le navigateur.
-   - Plus de choix : remplacer GitHub par ce dossier, force push ;
-     changements en attente, `git stash` ; rendre public ou non public ;
-     lier avec un autre repo GitHub ; supprimer le `.git`.
-   - Tous les repos d'un dossier : push ou pull de chacun, en une fois.
-   - Envoyer un dossier : sans repo local, ou pour un nouveau projet ; le
+   - 2 Recevoir : pull.
+   - 3 Voir les changements : voir les commits, ou voir les différences en
+     local et en ligne. Les commits en avance d'un côté s'affichent
+     seulement s'il y en a.
+   - 4 Branches : parcourir les fichiers d'une branche, voir ses commits,
+     passer dessus, en faire une nouvelle, la fusionner dans la branche
+     actuelle, la supprimer ici ou en ligne.
+   - 5 Annuler un commit ou des changements : les changements d'un
+     fichier, ou le dernier commit, ici et en ligne en une seule action.
+   - 6 Changements pour plus tard : `git stash` range les changements pas
+     encore en commit, pour les reprendre plus tard ou les supprimer.
+   - 7 Ouvrir la copie sur cette machine : le dossier dans le gestionnaire
+     de fichiers du système.
+   - 8 Ouvrir la copie en ligne : la page du repo dans le navigateur.
+   - 9 Remplacer GitHub par ce dossier : force push.
+   - 10 Rendre public ou non public.
+   - 11 Lier avec un autre repo GitHub.
+   - 12 Supprimer le `.git` de ce dossier.
+   - N : envoyer un dossier sans repo local, ou un nouveau projet ; le
      programme demande le nom, la description et si le repo est public.
+   - T : tous les repos d'un dossier, push ou pull de chacun en une fois.
+   - Dossier introuvable : le programme le redemande, cinq essais en tout,
+     puis revient d'un niveau.
    - Dossier sans git, ou au `.git` illisible : le programme propose de le
      lier avec un repo GitHub en ligne, celui du même nom s'il existe, puis
-     de faire un pull. Les fichiers du dossier qui ne sont pas comme la
-     version en ligne partent dans `git stash`, ou restent, au choix.
-3. Compte GitHub : changer de moyen de connexion, changer de compte,
-   changer de serveur, voir les permissions de la connexion, temps de garde
-   du compte sur la machine, fermer la session.
-4. Fermer la session : le programme demande ensuite quoi faire du compte sur
-   la machine.
-   - Garder le compte : la prochaine connexion par le navigateur le
-     réutilise.
-   - Supprimer le compte : connexion enregistrée, identifiants en clair, nom
-     et email des commits et réglages du compte sont effacés.
-5. Supprimer les identifiants de cette machine : seulement quand des
-   identifiants y sont gardés ; tout est effacé et la session se ferme.
+     de faire un pull ; ou de créer un nouveau repo GitHub. Les fichiers du
+     dossier qui ne sont pas comme la version en ligne partent dans
+     `git stash`, ou restent, au choix.
+   - Repo git dans un autre repo : avant le commit, le programme le signale
+     et propose de le laisser hors du commit, dans le `.gitignore`. Sans
+     ce choix, GitHub montre un dossier vide à sa place.
 
 ### Option 2 : entreprise
 
