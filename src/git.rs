@@ -292,7 +292,7 @@ pub fn git_direct(args: &[&str], cwd: Option<&Path>) -> i32 {
     let (mut phase, mut lignes, mut dernier): (&str, Vec<String>, Option<(&str, String)>) = ("", vec![], None);
     let mut morceau = Vec::new();
     let mut octet = [0u8; 4096];
-    let mut traiter = |brut: &[u8], phase: &mut &str, lignes: &mut Vec<String>, dernier: &mut Option<(&str, String)>| {
+    let traiter = |brut: &[u8], phase: &mut &str, lignes: &mut Vec<String>, dernier: &mut Option<(&str, String)>| {
         let ligne = String::from_utf8_lossy(brut).trim().to_string();
         if ligne.is_empty() {
             return;
