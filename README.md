@@ -87,7 +87,9 @@ GitHub de Saleh Kamil. Sans nom dans le profil GitHub, l'identifiant du
 compte le remplace.
 
 1. Repos GitHub en ligne : la liste des repos sur GitHub, avec une
-   recherche par nom ; le numéro d'un repo l'ouvre.
+   recherche par nom ; le numéro d'un repo l'ouvre. La colonne En local
+   dit oui pour chaque repo qui a une copie sur la machine, cherchée aux
+   mêmes endroits que la liste Repos GitHub en local.
    - Parcourir les fichiers : d'abord le choix de la branche.
    - Voir les commits : d'abord le choix de la branche.
    - Rendre public ou non public.
@@ -160,7 +162,7 @@ compte le remplace.
 4. Fermer la session, en gardant ou en supprimant le compte de la machine.
 5. Supprimer les identifiants de cette machine, quand il y en a.
 
-### Option 2 : entreprise
+### Option 2 : gérer et synchroniser sur le poste Entreprise
 
 Connexion au compte GitHub de l'entreprise.
 

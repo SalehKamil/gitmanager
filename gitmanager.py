@@ -46,7 +46,8 @@ separes. Les textes du programme evitent les mots qui prennent un accent.
      - Compte GitHub : moyen de connexion, compte, serveur, permissions,
        temps de garde. Fermer la session : choix 4 du menu des repos.
 
-  2. Entreprise, connexion au compte GitHub de l'entreprise
+  2. Gerer et synchroniser sur le poste Entreprise, connexion au compte
+     GitHub de l'entreprise
      - Importer un repo GitHub par son URL, compte/nom ou un dossier de la
        machine. Une copie du repo deja sur la machine sert sans connexion au
        compte perso ; sinon, sans connexion s'il est public, avec le compte
@@ -107,7 +108,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.15.0"
+__version__ = "2.15.1"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -2548,11 +2549,11 @@ def trouver_projets(dossier, profondeur=2):
 
 
 def index_locaux(cfg):
-    """{owner/repo: dossier local} pour les projets deja connus."""
+    """{owner/repo: dossier local} des copies sur cette machine, cherchees aux
+    memes endroits que la liste Repos GitHub en local : les deux listes disent
+    la meme chose. La copie la plus recente passe en premier."""
     index = {}
-    dossiers = {cfg.get("espace"), os.path.dirname(cfg.get("dernier_dossier") or "")}
-    projets = [p for d in filter(None, dossiers) if os.path.isdir(d)
-               for p in trouver_projets(d)]
+    projets = projets_de_la_machine(cfg)
     with ThreadPoolExecutor(max_workers=8) as pool:
         for p, urls in zip(projets, pool.map(urls_remotes, projets)):
             for url in urls.values():
@@ -5153,7 +5154,7 @@ def choisir_fonction(cfg):
         print()
         print("    1. " + (f"Repos GitHub de {nom_affiche(perso)}" if perso
                            else "Gerer les repos GitHub"))
-        print("    2. Entreprise : import et repos GitHub de l'entreprise"
+        print("    2. Gerer et synchroniser sur le poste Entreprise"
               + (f", compte {nom_affiche(pro)}" if pro else ""))
         for i, (libelle, _) in enumerate(actions, 3):
             print(f"    {i}. {libelle}")
@@ -5225,7 +5226,7 @@ def menu_perso(cfg):
 
 def menu_entreprise(cfg):
     while not NAVIGATION["menu_principal"] and connexion_obligatoire(cfg):
-        titre("OPTION 2 : ENTREPRISE")
+        titre("Gerer et synchroniser sur le poste Entreprise")
         ligne_compte(cfg)
         print()
         print("    1. Importer un repo GitHub")

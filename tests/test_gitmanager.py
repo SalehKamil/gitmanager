@@ -458,6 +458,24 @@ class LierAvecGitHub(Banc):
         self.assertIsNone(res)
 
 
+class CopiesLocales(Banc):
+    def test_liste_en_ligne_voit_les_memes_copies_que_la_liste_locale(self):
+        self.distant("demo")
+        self.distant("autre")
+        ailleurs = os.path.join(self.maison, "Documents", "demo")  # hors du dossier de travail
+        self.sh("git", "clone", "-q", "https://github.com/saleh/demo.git", ailleurs)
+        _, locale = self.lancer(gm.liste_depots_locaux, self.cfg, reponses=[""])
+        self.assertIn("saleh/demo", locale)
+        _, en_ligne = self.lancer(gm.act_depots, self.cfg, reponses=[""])
+        lignes = {l.split()[1]: l for l in en_ligne.splitlines() if l.strip()[:2].rstrip(".").isdigit()}
+        self.assertTrue(lignes["saleh/demo"].rstrip().endswith("oui"), lignes)
+        self.assertFalse(lignes["saleh/autre"].rstrip().endswith("oui"), lignes)
+
+    def test_menu_principal_option_entreprise(self):
+        _, sortie = self.lancer(gm.choisir_fonction, self.cfg, reponses=["0"])
+        self.assertIn("2. Gerer et synchroniser sur le poste Entreprise", sortie)
+
+
 class Menus(Banc):
     def test_oui_non_redemande_une_faute_de_frappe(self):
         res, sortie = self.lancer(gm.ask_yn, "Continuer ?", True, reponses=["oiu", "n"])
