@@ -108,7 +108,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.15.1"
+__version__ = "2.15.2"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -5039,8 +5039,13 @@ def _couleur(nom, fond):
     return f"{plan};2;{rgb[0]};{rgb[1]};{rgb[2]}" if vraies else f"{plan};5;{n256}"
 
 
+# Logo juste au-dessus : le menu principal qui suit ne le repete pas
+ACCUEIL = {"a_l_ecran": False}
+
+
 def afficher_accueil():
-    """Logo, nom et accroche, au lancement."""
+    """Logo, nom et accroche : au lancement, puis a chaque retour au menu principal."""
+    ACCUEIL["a_l_ecran"] = True
     print()
     if not COLOR:  # sans couleurs : le trace du logo, en noir et blanc
         lignes = []
@@ -5148,6 +5153,9 @@ def choisir_fonction(cfg):
     """Menu principal. Retourne le profil de l'option choisie, ou None pour quitter."""
     while True:
         verifier_gardes(cfg)
+        if not ACCUEIL["a_l_ecran"]:  # au lancement, le logo vient d'etre affiche
+            afficher_accueil()
+        ACCUEIL["a_l_ecran"] = False
         titre("MENU PRINCIPAL")
         actions, _ = actions_principales(cfg)
         perso, pro = PROFILS["perso"]["user"], PROFILS["entreprise"]["user"]

@@ -32,7 +32,8 @@ affiche la version installée. Pour le désinstaller :
 uv tool uninstall gitmanager
 ```
 
-Au lancement, le programme affiche son logo et son accroche. Il installe Git
+Au lancement, le programme affiche son logo et son accroche, et de nouveau à
+chaque retour au menu principal. Il installe Git
 s'il manque, dans la dernière version disponible, et affiche son empreinte
 SHA-256 pour la vérifier.
 

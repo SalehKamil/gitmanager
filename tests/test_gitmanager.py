@@ -131,6 +131,7 @@ class Banc(unittest.TestCase):
                           user={"login": "saleh", "name": "Saleh Kamil", "id": 1})
         gm.NAVIGATION["menu_principal"] = False
         gm.SUPPRIMES.clear()
+        gm.ACCUEIL["a_l_ecran"] = False
         self.questions = []
 
     def remplacer(self, objet, nom, valeur):
@@ -470,6 +471,17 @@ class CopiesLocales(Banc):
         lignes = {l.split()[1]: l for l in en_ligne.splitlines() if l.strip()[:2].rstrip(".").isdigit()}
         self.assertTrue(lignes["saleh/demo"].rstrip().endswith("oui"), lignes)
         self.assertFalse(lignes["saleh/autre"].rstrip().endswith("oui"), lignes)
+
+    def test_logo_a_chaque_retour_au_menu_principal(self):
+        self.remplacer(gm, "preparer_outils", lambda cfg: True)
+        self.remplacer(gm, "charger", lambda: self.cfg)
+        # 1 repos perso, 0 retour au menu principal, 0 quitter
+        _, sortie = self.lancer(gm.main, reponses=["1", "0", "0"])
+        logo = f"gitmanager {gm.__version__}"
+        self.assertEqual(sortie.count(logo), 2, "au lancement, puis au retour au menu principal")
+        self.assertEqual(sortie.count("MENU PRINCIPAL"), 2)
+        debut = sortie.split("MENU PRINCIPAL")[0]
+        self.assertEqual(debut.count(logo), 1, "au lancement : un seul logo, pas deux d'affile")
 
     def test_menu_principal_option_entreprise(self):
         _, sortie = self.lancer(gm.choisir_fonction, self.cfg, reponses=["0"])
