@@ -337,6 +337,20 @@ pub fn git_direct(args: &[&str], cwd: Option<&Path>) -> i32 {
     code
 }
 
+/// Sortie exacte d'une commande git de lecture, sans rien retirer : contenu d'un fichier.
+pub fn git_brut(args: &[&str], cwd: Option<&Path>) -> (i32, Vec<u8>) {
+    let mut cmd = Command::new("git");
+    cmd.arg("-c").arg("core.quotepath=off").args(args).stdin(Stdio::null()).stderr(Stdio::null());
+    if let Some(d) = cwd {
+        cmd.current_dir(d);
+    }
+    appliquer_env(&mut cmd, &env_git(None, false));
+    match cmd.output() {
+        Ok(o) => (o.status.code().unwrap_or(-1), o.stdout),
+        Err(_) => (127, vec![]),
+    }
+}
+
 pub fn erreur_auth(sortie: &str) -> bool {
     let s = sortie.to_lowercase();
     ["could not read username", "terminal prompts disabled", "authentication failed",

@@ -3,6 +3,7 @@
 #![allow(dead_code)] // le temps de la reecriture : retire a la fin de la tache 5
 
 mod affichage;
+mod comparer;
 mod config;
 mod connexion;
 mod en_ligne;
@@ -13,6 +14,7 @@ mod github;
 mod local;
 mod menus;
 mod outils;
+mod projet;
 mod resultat;
 mod saisie;
 mod session;

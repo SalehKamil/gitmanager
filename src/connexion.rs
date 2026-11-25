@@ -983,3 +983,8 @@ mod essais {
         assert_eq!(percent_decode("abc"), "abc");
     }
 }
+
+/// Push refuse : la permission contents=write manque au jeton ou a la connexion.
+pub fn mettre_a_jour_permissions_push(cfg: &mut Config) -> bool {
+    crate::github::mettre_a_jour_permissions(cfg, "contents=write, push dans ce repo", None)
+}
