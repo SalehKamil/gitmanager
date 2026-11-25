@@ -8,7 +8,6 @@ Lancement : python -m unittest discover -s tests -v
 GM_VOIR=1 affiche aussi les ecrans du programme.
 """
 
-import builtins
 import contextlib
 import http.client
 import io
@@ -131,8 +130,38 @@ class Banc(unittest.TestCase):
         gm.SUPPRIMES.clear()
         self.questions = []
 
+    def remplacer(self, objet, nom, valeur):
+        """Remplace un attribut le temps de l'essai."""
+        self.anciens.append((objet, nom, getattr(objet, nom)))
+        setattr(objet, nom, valeur)
+
+    def faux_gh(self):
+        """GitHub CLI factice dans le PATH : connexion par code, jeton, deconnexion."""
+        dossier = os.path.join(self.tmp, "bin")
+        os.makedirs(dossier, exist_ok=True)
+        etat = os.path.join(self.tmp, "gh-connecte")
+        script = Path(dossier, "gh")
+        script.write_text(f"""#!/bin/sh
+case "$1 $2" in
+  "--version "*) echo "gh version 2.89.0 (2026-03-26)" ;;
+  "auth login"|"auth refresh")
+    echo "! First copy your one-time code: ABCD-1234"
+    echo "Open this URL to continue in your web browser: https://github.com/login/device"
+    echo "Authentication complete."
+    touch "{etat}" ;;
+  "auth token") [ -f "{etat}" ] && echo "jeton-gh" || exit 1 ;;
+  "auth setup-git") ;;
+  "auth status") [ -f "{etat}" ] && echo "Logged in to github.com account saleh" \
+      || {{ echo "You are not logged into any GitHub hosts." >&2; exit 1; }} ;;
+  "auth logout") rm -f "{etat}" ;;
+esac
+""", encoding="utf-8")
+        script.chmod(0o755)
+        os.environ["PATH"] = dossier + os.pathsep + os.environ["PATH"]
+        return etat
+
     def tearDown(self):
-        for o, n, v in self.anciens:
+        for o, n, v in reversed(self.anciens):
             setattr(o, n, v)
         if hasattr(gm, "input"):
             del gm.input
@@ -497,6 +526,133 @@ class Parcours(Banc):
         self.sh("git", "clone", "-q", "https://github.com/saleh/entre.git", verif)
         self.assertTrue(os.path.exists(os.path.join(verif, "code.py")))
         self.assertTrue(os.path.exists(os.path.join(verif, "README.md")))
+
+
+class Revue(Banc):
+    """Points de la revue de code du fichier entier."""
+
+    def test_repo_recree_apres_suppression_visible(self):
+        gm.SUPPRIMES.add("saleh/demo")
+        url = self.lancer(gm.creer_depot, self.cfg, "demo", True)[0]
+        self.assertTrue(url)
+        self.assertIn("saleh/demo", [d["full_name"] for d in gm.liste_repos(self.cfg)])
+
+    def test_repo_deja_supprime_sur_github(self):
+        self.distant("demo")
+        self.github.supprimes.add("saleh/demo")
+        ok, sortie = self.lancer(gm.supprimer_depot, self.cfg, self.github.repos["saleh/demo"], {},
+                                 reponses=["demo"])
+        self.assertTrue(ok)
+        self.assertIn("n'existe plus sur GitHub", sortie)
+        self.assertNotIn("permission", sortie)
+
+    def test_adresse_collee_sans_https(self):
+        for saisie in ("github.com/saleh/demo", "www.github.com/saleh/demo/",
+                       "https://github.com/saleh/demo", "saleh/demo"):
+            self.assertEqual(gm.url_repo_en_ligne(self.cfg, saisie).removesuffix(".git"),
+                             "https://github.com/saleh/demo", saisie)
+        self.assertEqual(gm.url_source("github.com/saleh/demo"), "https://github.com/saleh/demo")
+
+    def test_adresse_http_refusee_sans_quitter_la_liste(self):
+        res, sortie = self.lancer(gm.liste_depots_locaux, self.cfg,
+                                  reponses=["u", "http://github.com/saleh/demo"])
+        self.assertIsNone(res, "la liste locale continue")
+        self.assertIn("Adresse refusee", sortie)
+
+    def test_chemins_avec_espaces(self):
+        self.distant("demo")
+        local = self.copie("demo")
+        os.makedirs(os.path.join(local, "sous repo"))
+        self.sh("git", "init", "-q", os.path.join(local, "sous repo"))
+        self.assertEqual(gm.fichiers_modifies(local), [], "un sous-repo ne compte pas")
+        Path(local, "a b.txt").write_text("x\n", encoding="utf-8")
+        self.assertEqual(gm.fichiers_modifies(local), ["?? a b.txt"])
+        _, sortie = self.lancer(gm.annuler_fichier, local, reponses=["1", "o"])
+        self.assertFalse(os.path.exists(os.path.join(local, "a b.txt")))
+        self.assertIn("nouveau   a b.txt\n", sortie)
+        self.assertNotIn("git rm", sortie, "fichier jamais ajoute : pas de git rm")
+
+    def test_nouveau_nom_compte_une_fois(self):
+        self.distant("demo")
+        local = self.copie("demo")
+        self.sh("git", "mv", "README.md", "LISEZMOI.md", cwd=local)
+        self.assertEqual(gm.fichiers_modifies(local), ["R  LISEZMOI.md"])
+
+    def test_annulation_dont_le_push_echoue(self):
+        self.distant("demo")
+        local = self.copie("demo")
+        Path(local, "b.txt").write_text("b\n", encoding="utf-8")
+        self.sh("git", "add", "-A", cwd=local)
+        self.sh("git", "commit", "-q", "-m", "Ajout de b", cwd=local)
+        self.sh("git", "push", "-q", cwd=local)
+        nu = os.path.join(self.distants, "saleh", "demo.git")
+        os.rename(nu, nu + ".ailleurs")  # serveur injoignable
+        _, sortie = self.lancer(gm.annuler_commit, self.cfg, local, reponses=[""])
+        self.assertIn("Annulation faite ici seulement", sortie)
+        self.assertTrue(self.sh("git", "log", "-1", "--format=%s", cwd=local)
+                        .startswith("Annulation du commit"))
+
+
+class Connexion(Banc):
+    """Connexion par le navigateur, fin de session et suppression du compte,
+    avec un GitHub CLI factice."""
+
+    def setUp(self):
+        super().setUp()
+        gm.SESSION.update(token="", user=None, methode=None)
+        self.remplacer(gm, "_CACHE_GCM", [None])  # sans Git Credential Manager
+
+    def test_code_attendu_puis_compte_supprime_en_fin_de_programme(self):
+        etat = self.faux_gh()
+        for cle in ("user.name", "user.email"):  # identite ecrite par gitmanager
+            self.sh("git", "config", "--global", "--unset", cle)
+        # Enter apres la copie du code ; garde 1 : pour cette session
+        connecte, sortie = self.lancer(gm.connexion_navigateur, self.cfg, reponses=["", "1"])
+        self.assertTrue(connecte, sortie)
+        self.assertIn("ABCD-1234", sortie)
+        self.assertLess(sortie.index("ABCD-1234"), sortie.index("Ouverture dans le navigateur"),
+                        "le navigateur s'ouvre apres la copie du code")
+        self.assertEqual((gm.SESSION["methode"], self.cfg.get("cles"), self.cfg.get("garde")),
+                         ("gh", "gh", "session"))
+        self.assertEqual(self.sh("git", "config", "--global", "user.name").strip(), "Saleh Kamil")
+        _, sortie = self.lancer(gm.verifier_gardes, self.cfg, False, True)
+        self.assertFalse(os.path.exists(etat), "plus de connexion dans GitHub CLI")
+        self.assertFalse(any(k in self.cfg for k in ("cles", "login", "garde")), self.cfg)
+        code = subprocess.run(["git", "config", "--global", "user.name"]).returncode
+        self.assertNotEqual(code, 0, "identite ecrite par gitmanager effacee")
+        self.assertNotIn("restent", sortie)
+
+    def test_fermer_la_session_en_gardant_le_compte(self):
+        etat = self.faux_gh()
+        Path(etat).touch()
+        self.cfg.update(cles="gh", login="saleh", methode="gh", enregistrer_connexion=True)
+        gm.SESSION.update(token="jeton-gh", methode="gh", user={"login": "saleh"})
+        fait, _ = self.lancer(gm.deconnexion, self.cfg, reponses=["1"])
+        self.assertTrue(fait)
+        self.assertIsNone(gm.SESSION["user"])
+        self.assertTrue(os.path.exists(etat), "le compte reste sur la machine")
+        self.assertFalse(self.cfg["enregistrer_connexion"])
+
+    def test_identifiants_en_clair_retires_pour_ce_compte_seulement(self):
+        self.remplacer(gm, "chemin_gh", lambda: None)
+        fichier = Path(self.maison, ".git-credentials")
+        fichier.write_text("https://saleh:ghp_secret@github.com\nhttps://autre:t@github.com\n",
+                           encoding="utf-8")
+        self.cfg.update(login="saleh")
+        self.lancer(gm.supprimer_compte, self.cfg, "saleh")
+        self.assertEqual(fichier.read_text(encoding="utf-8"), "https://autre:t@github.com\n")
+
+    def test_permission_refusee_dans_le_navigateur(self):
+        self.distant("demo")
+        self.faux_gh()
+        gm.SESSION.update(token="ancien", methode="gh", user={"login": "saleh"})
+        self.github.jetons_admin = {"autre"}
+        self.remplacer(gm, "gh_par_navigateur", lambda args: 1)
+        # nom ; demander la permission : oui ; menu : 0 annuler
+        ok, sortie = self.lancer(gm.supprimer_depot, self.cfg, self.github.repos["saleh/demo"], {},
+                                 reponses=["demo", "", "0"])
+        self.assertFalse(ok)
+        self.assertIn("Permission pas ajoutee", sortie)
 
 
 if __name__ == "__main__":

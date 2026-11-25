@@ -193,7 +193,9 @@ place de GitHub, et un faux GitHub pour l'API.
 python -m unittest discover -s tests -v
 ```
 
-Avec `GM_VOIR=1`, les écrans du programme s'affichent aussi.
+Avec `GM_VOIR=1`, les écrans du programme s'affichent aussi. La connexion
+par le navigateur passe par un GitHub CLI factice : la vraie connexion à
+GitHub reste à essayer sur la machine.
 
 ## Sécurité
 

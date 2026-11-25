@@ -107,7 +107,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.14.0"
+__version__ = "2.14.1"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -661,15 +661,32 @@ def url_remote(nom, chemin):
     return out.strip() if code == 0 else ""
 
 
-def fichiers_modifies(chemin):
-    """Fichiers au commit manquant. Un sous-repo git ne compte pas : son contenu
+def lignes_statut(chemin):
+    """Lignes 'XY chemin' de git status, chemins exacts (-z : sans guillemets ni
+    codes, meme avec des espaces). Un sous-repo git ne compte pas : son contenu
     ne part jamais avec ce repo."""
-    code, out, _ = git("status", "--porcelain", "--ignore-submodules=all", cwd=chemin, quiet=True)
+    code, out, _ = git("status", "--porcelain", "-z", "--ignore-submodules=all", cwd=chemin,
+                       quiet=True)
     if code != 0:
         return []
-    return [l for l in out.splitlines() if l.strip() and not (
-        l.startswith("?? ") and l.endswith("/")
-        and os.path.exists(os.path.join(chemin, l[3:].strip('"'), ".git")))]
+    morceaux, lignes, i = out.split("\0"), [], 0
+    while i < len(morceaux):
+        rec = morceaux[i]
+        i += 1
+        if len(rec) < 4:
+            continue
+        if rec[0] in "RC":  # nouveau nom : l'ancien chemin suit, il ne compte pas a part
+            i += 1
+        if rec.startswith("?? ") and rec.endswith("/") \
+                and os.path.exists(os.path.join(chemin, rec[3:], ".git")):
+            continue
+        lignes.append(rec)
+    return lignes
+
+
+def fichiers_modifies(chemin):
+    """Fichiers au commit manquant : lignes 'XY chemin'."""
+    return lignes_statut(chemin)
 
 
 def fichiers_en_conflit(chemin):
@@ -1432,29 +1449,29 @@ def gh_par_navigateur(args):
     le code a usage unique et l'adresse s'affichent en francais, et la page
     s'ouvre dans le navigateur. Retourne le code de sortie de GitHub CLI."""
     env = dict(os.environ, GH_PROMPT_DISABLED="1", NO_COLOR="1", GH_NO_UPDATE_NOTIFIER="1")
-    p = subprocess.Popen([chemin_gh()] + args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                         env=env)
     code_vu, adresse_vue = False, False
-    for ligne in p.stdout:
-        code = re.search(r"\b([A-Z0-9]{4}-[A-Z0-9]{4})\b", ligne)
-        adresse = re.search(r"(https://\S+)", ligne)
-        if code and not code_vu:
-            code_vu = True
-            print()
-            info("Code pour la page GitHub :")
-            print(c(f"       {code.group(1)}", "1;33"))
-            ask("Copier ce code, puis Enter pour ouvrir le navigateur", "", obligatoire=False)
-        elif adresse and not adresse_vue and "device" in adresse.group(1):
-            adresse_vue = True
-            ouvrir_navigateur(adresse.group(1).rstrip("."))
-            info("Coller le code dans la page, puis cliquer sur 'Authorize'.")
-            info("Attente de la validation, Ctrl+C pour annuler...")
-        elif "Authentication complete" in ligne:
-            ok("Autorisation GitHub OK.")
-        elif DEBUG and ligne.strip():
-            print("     " + ligne.rstrip())
-    return p.wait()
+    with subprocess.Popen([chemin_gh()] + args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                          env=env) as p:
+        for ligne in p.stdout:
+            code = re.search(r"\b([A-Z0-9]{4}-[A-Z0-9]{4})\b", ligne)
+            adresse = re.search(r"(https://\S+)", ligne)
+            if code and not code_vu:
+                code_vu = True
+                print()
+                info("Code pour la page GitHub :")
+                print(c(f"       {code.group(1)}", "1;33"))
+                ask("Copier ce code, puis Enter pour ouvrir le navigateur", "", obligatoire=False)
+            elif adresse and not adresse_vue and "device" in adresse.group(1):
+                adresse_vue = True
+                ouvrir_navigateur(adresse.group(1).rstrip("."))
+                info("Coller le code dans la page, puis cliquer sur 'Authorize'.")
+                info("Attente de la validation, Ctrl+C pour annuler...")
+            elif "Authentication complete" in ligne:
+                ok("Autorisation GitHub OK.")
+            elif DEBUG and ligne.strip():
+                print("     " + ligne.rstrip())
+        return p.wait()
 
 
 def gh_jetons_expirants():
@@ -2584,7 +2601,17 @@ def adresse_du_choix(cfg, choix):
     if isinstance(choix, dict):
         return choix.get("clone_url") or url_repo_en_ligne(cfg, choix["full_name"])
     cible = ask("Repo en ligne : compte/nom ou URL, Enter pour revenir", "", obligatoire=False)
-    return url_repo_en_ligne(cfg, cible) if cible else None
+    return adresse_saisie(cfg, cible) if cible else None
+
+
+def adresse_saisie(cfg, cible):
+    """Adresse du repo saisi, ou None apres un message : une adresse refusee,
+    http:// par exemple, ramene d'un seul niveau."""
+    try:
+        return url_repo_en_ligne(cfg, cible)
+    except Arret as a:
+        err(f"Adresse refusee : {a.detail}.")
+        return None
 
 
 def creer_depot(cfg, nom, prive, org="", description=""):
@@ -2594,6 +2621,7 @@ def creer_depot(cfg, nom, prive, org="", description=""):
         donnees["description"] = description
     code, rep, _ = api(cfg, "POST", chemin, donnees)
     if code == 201:
+        SUPPRIMES.discard((rep.get("full_name") or "").lower())  # meme nom qu'un repo supprime
         ok(f"Nouveau repo : {rep.get('html_url')}, {'non public' if prive else 'public'}")
         return rep.get("clone_url")
     if code == 422 and "already exists" in json.dumps(rep):
@@ -2702,11 +2730,8 @@ def voir_commits_locaux(cfg, chemin):
 
 
 def chemin_porcelaine(ligne):
-    """Chemin du fichier dans une ligne de git status --porcelain."""
-    chemin = ligne[3:]
-    if " -> " in chemin:
-        chemin = chemin.split(" -> ", 1)[1]
-    return chemin.strip('"')
+    """Chemin du fichier dans une ligne de lignes_statut."""
+    return ligne[3:]
 
 
 def dans_le_dernier_commit(chemin, fichier):
@@ -2952,7 +2977,8 @@ def annuler_fichier(chemin):
     choix = ask("Choix : # du fichier, Enter pour revenir", "", obligatoire=False)
     if not (choix.isdigit() and 1 <= int(choix) <= min(len(modifs), 60)):
         return
-    fichier = chemin_porcelaine(modifs[int(choix) - 1])
+    ligne = modifs[int(choix) - 1]
+    fichier = chemin_porcelaine(ligne)
     complet = os.path.join(chemin, fichier)
     if os.path.isdir(complet):
         info("Dossier nouveau : le supprimer dans le gestionnaire de fichiers si besoin.")
@@ -2966,7 +2992,8 @@ def annuler_fichier(chemin):
         code, _, e = git("restore", "--source=HEAD", "--staged", "--worktree", "--", fichier,
                          cwd=chemin, quiet=True)
     else:  # fichier nouveau : il disparait
-        git("rm", "--cached", "--quiet", "--ignore-unmatch", "--", fichier, cwd=chemin, quiet=True)
+        if not ligne.startswith("??"):  # deja dans l'index (git add) : il en sort
+            git("rm", "--cached", "--quiet", "--ignore-unmatch", "--", fichier, cwd=chemin, quiet=True)
         try:
             os.remove(complet)
             code, e = 0, ""
@@ -3010,8 +3037,13 @@ def annuler_commit(cfg, chemin):
             git("revert", "--abort", cwd=chemin, quiet=True)
             err("Annulation impossible : " + expliquer(e))
             return
-        branche, remote = preparer(cfg, chemin, auto=False)
-        statut, detail = pousser(cfg, chemin, remote, branche, commit_affiche=True)
+        try:
+            branche, remote = preparer(cfg, chemin, auto=False)
+            statut, detail = pousser(cfg, chemin, remote, branche, commit_affiche=True)
+        except Arret as a:
+            afficher_resultat(a.statut, a.detail)
+            warn("Annulation faite ici seulement : son commit attend, Envoyer le met en ligne.")
+            return
         afficher_resultat(statut, detail)
         if statut == "ok":
             ok("Annulation du commit OK, ici et en ligne.")
@@ -3208,9 +3240,17 @@ def repo_du_meme_nom(cfg, chemin):
     return next((d for d in repos if (d.get("name") or "").lower() == nom), None)
 
 
+def avec_https(saisie):
+    """github.com/compte/nom, colle sans https:// : adresse https complete."""
+    s = saisie.strip().strip('"').strip("'").rstrip("/")
+    if re.fullmatch(r"(?:www\.)?[\w-]+(?:\.[\w-]+)+/[\w.-]+/[\w.-]+", s):
+        return "https://" + re.sub(r"^www\.", "", s)
+    return s
+
+
 def url_repo_en_ligne(cfg, cible):
     """nom, compte/nom ou URL : adresse du repo en ligne."""
-    cible = cible.strip()
+    cible = avec_https(cible)
     if "://" in cible or cible.startswith("git@"):
         return verifier_url(cible)
     if "/" not in cible:
@@ -3722,14 +3762,7 @@ def fichiers_en_local(chemin):
 
 def etats_locaux(chemin):
     """{fichier: code XY de git status} des fichiers au commit manquant."""
-    _, out, _ = git("status", "--porcelain", "-z", "--ignore-submodules=all", cwd=chemin,
-                    quiet=True)
-    etats = {}
-    for rec in (r for r in out.split("\0") if len(r) > 3):
-        if rec.endswith("/") and os.path.exists(os.path.join(chemin, rec[3:], ".git")):
-            continue  # repo git dans ce repo : hors comparaison
-        etats[rec[3:]] = rec[:2]
-    return etats
+    return {rec[3:]: rec[:2] for rec in lignes_statut(chemin)}  # sous-repos hors comparaison
 
 
 def ecarts_fichiers(chemin, ref):
@@ -4156,15 +4189,13 @@ def cloner(cfg, d):
 def cloner_par_url(cfg):
     """Clone d'un repo qui n'est pas dans la liste du compte : URL ou compte/nom."""
     saisie = ask("Repo : URL ou compte/nom, Enter pour revenir", "", obligatoire=False)
-    if not saisie:
+    url = adresse_saisie(cfg, saisie) if saisie else None
+    if not url:
         return
-    url = url_repo_en_ligne(cfg, saisie)
     nom = (infos_url(url)[2] or os.path.basename(url.rstrip("/"))).removesuffix(".git")
     dest = executer(cloner, cfg, {"name": nom, "full_name": cle_depot(url) or nom, "clone_url": url})
     if dest:
         menu_projet(cfg, dest)
-    else:
-        pause()
 
 
 def sensibles_sur_github(cfg, d):
@@ -4220,10 +4251,14 @@ def supprimer_depot(cfg, d, locaux=None):
     if confirme.strip().lower() not in (d["name"].lower(), full.lower()):
         info("Abandon : le repo reste sur GitHub.")
         return False
-    if not supprimer_sur_github(cfg, d):
+    fait = supprimer_sur_github(cfg, d)
+    if not fait:
         return False
     SUPPRIMES.add(full.lower())
-    ok(f"{full} : suppression OK sur GitHub.")
+    if fait == "absent":
+        warn(f"{full} n'existe plus sur GitHub : deja supprime, par exemple dans le navigateur.")
+    else:
+        ok(f"{full} : suppression OK sur GitHub.")
     local = (locaux or {}).get(full.lower())
     if local and os.path.isdir(local):
         copie_apres_suppression(local, full, locaux)
@@ -4232,16 +4267,19 @@ def supprimer_depot(cfg, d, locaux=None):
 
 def supprimer_sur_github(cfg, d):
     """DELETE /repos/... ; sans la permission de supprimer, la demande a GitHub
-    CLI, puis propose un jeton pour cette fois ou la page du repo."""
+    CLI, puis propose un jeton pour cette fois ou la page du repo. Retourne True,
+    "absent" si le repo n'existe deja plus, ou False."""
     full = d["full_name"]
     if not assurer_connexion(cfg):
         return False
-    code, rep, hdr = requete(cfg, "DELETE", f"/repos/{full}")
+    code, rep, _ = requete(cfg, "DELETE", f"/repos/{full}")
     if code == 401 and rafraichir_session(cfg):
-        code, rep, hdr = requete(cfg, "DELETE", f"/repos/{full}")
+        code, rep, _ = requete(cfg, "DELETE", f"/repos/{full}")
     if code == 204:
         return True
-    if code not in (403, 404):
+    if code == 404:  # le repo vient d'etre lu : il a ete supprime entre-temps
+        return "absent"
+    if code != 403:
         err(f"Suppression impossible, code {code or 'aucun'} : {message_api(rep)}")
         return False
     if DEBUG:
@@ -4250,13 +4288,15 @@ def supprimer_sur_github(cfg, d):
     warn("GitHub refuse : la connexion n'a pas la permission de supprimer des repos.")
     if SESSION["methode"] == "gh" and chemin_gh():
         info("GitHub CLI peut ajouter la permission delete_repo, dans le navigateur.")
-        if ask_yn("La demander maintenant ?", True) and gh_par_navigateur(
-                ["auth", "refresh", "-h", host(cfg), "-s", "delete_repo"]) == 0:
-            SESSION["token"] = token_silencieux(cfg, "gh") or SESSION["token"]
-            code, rep, _ = requete(cfg, "DELETE", f"/repos/{full}")
-            if code == 204:
-                return True
-            warn("Toujours refuse : l'organisation interdit peut-etre la suppression des repos.")
+        if ask_yn("La demander maintenant ?", True):
+            if gh_par_navigateur(["auth", "refresh", "-h", host(cfg), "-s", "delete_repo"]) == 0:
+                SESSION["token"] = token_silencieux(cfg, "gh") or SESSION["token"]
+                code, rep, _ = requete(cfg, "DELETE", f"/repos/{full}")
+                if code == 204:
+                    return True
+                warn("Toujours refuse : l'organisation interdit peut-etre la suppression des repos.")
+            else:
+                warn("Permission pas ajoutee : autorisation annulee ou refusee dans le navigateur.")
     elif SESSION["methode"] == "gcm":
         info("Git Credential Manager ne donne pas cette permission.")
     print()
@@ -4385,7 +4425,7 @@ def url_source(saisie):
         return local
     if re.fullmatch(r"[\w.-]+/[\w.-]+", s):
         return f"https://github.com/{s.removesuffix('.git')}.git"
-    return verifier_url(s)
+    return verifier_url(avec_https(s))
 
 
 def recuperer_source(cfg, url, dossier):
