@@ -7,30 +7,42 @@ de travailler sur ses projets depuis l'ordinateur perso, plus confortable,
 puis de les envoyer sur l'ordinateur pro. Il sert aussi à gérer ses repos
 GitHub, en local comme en ligne.
 
-C'est un petit programme Python qui remplace les commandes Git par des menus :
-un numéro suffit pour lancer les bonnes commandes.
+C'est un petit programme écrit en Rust qui remplace les commandes Git par des
+menus : un numéro suffit pour lancer les bonnes commandes. Un seul fichier
+par système, Windows, macOS ou Linux, sans Python ni autre outil à installer
+que Git : il démarre en quelques millisecondes.
 
-## Comment l'utiliser
+## Installation
 
-Le programme se lance avec uv, qui fournit Python :
-
-```bash
-uv run gitmanager.py
-```
-
-Pour le retrouver sur n'importe quel poste, l'installer comme commande :
+Sous macOS ou Linux, dans un terminal :
 
 ```bash
-uv tool install https://github.com/SalehKamil/gitmanager/archive/refs/heads/main.zip
+curl -fsSL https://raw.githubusercontent.com/SalehKamil/gitmanager/main/install.sh | sh
 ```
 
-Il se lance ensuite en tapant `gitmanager`, depuis n'importe quel dossier. La
-même installation avec `--reinstall` le met à jour, et `gitmanager --version`
-affiche la version installée. Pour le désinstaller :
+Sous Windows, dans PowerShell :
+
+```powershell
+irm https://raw.githubusercontent.com/SalehKamil/gitmanager/main/install.ps1 | iex
+```
+
+La commande prend la dernière version publiée sur GitHub, vérifie son
+empreinte SHA-256, la met dans un dossier de l'utilisateur
+(`~/.local/bin`, ou `%LOCALAPPDATA%\Programs\gitmanager` sous Windows) et
+ajoute ce dossier au PATH si besoin. La même commande met à jour une version
+déjà installée. Les fichiers sont aussi sur la page des versions :
+https://github.com/SalehKamil/gitmanager/releases
+
+Ensuite, gitmanager se lance en tapant `gitmanager`, depuis n'importe quel
+dossier ; `gitmanager --version` affiche la version installée.
+
+L'ancienne version Python, installée avec uv, se retire avec :
 
 ```bash
 uv tool uninstall gitmanager
 ```
+
+## Comment l'utiliser
 
 Au lancement, le programme affiche son logo et son accroche, et de nouveau à
 chaque retour au menu principal. Il installe Git
@@ -193,18 +205,18 @@ Connexion au compte GitHub de l'entreprise.
 ## Essais
 
 Les essais tournent sans réseau : de vrais repos git sur la machine, à la
-place de GitHub, et un faux GitHub pour l'API.
+place de GitHub, un faux GitHub pour l'API et un GitHub CLI factice.
 
 ```bash
-python -m unittest discover -s tests -v
+cargo test
 ```
 
-Avec `GM_VOIR=1`, les écrans du programme s'affichent aussi. La connexion
-par le navigateur passe par un GitHub CLI factice : la vraie connexion à
-GitHub reste à essayer sur la machine.
+Avec `GM_VOIR=1`, les écrans du programme s'affichent aussi. La vraie
+connexion à GitHub reste à essayer sur la machine.
 
 Sur GitHub, les essais tournent à chaque push sur main, sous Linux, Windows
-et macOS, avec Python 3.13 et 3.9, la version minimum.
+et macOS. À chaque nouvelle version de `Cargo.toml`, GitHub construit les
+exécutables et les publie avec leurs empreintes SHA-256.
 
 ## Sécurité
 
