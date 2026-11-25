@@ -106,7 +106,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.13.2"
+__version__ = "2.13.3"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -2930,7 +2930,8 @@ def annuler_commit(cfg, chemin):
         code, _, e = git("revert", "--no-commit", *(["-m", "1"] if fusion else []), "HEAD",
                          cwd=chemin, quiet=True)
         if code == 0:
-            code, _, e = git("commit", "-m", f"Annulation de {dernier}", cwd=chemin, quiet=True)
+            code, _, e = git("commit", "-m", "Annulation du commit "
+                             + " : ".join(dernier.split("  ", 1)), cwd=chemin, quiet=True)
         if code != 0:
             git("revert", "--abort", cwd=chemin, quiet=True)
             err("Annulation impossible : " + expliquer(e))
