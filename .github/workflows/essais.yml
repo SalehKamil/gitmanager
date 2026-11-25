@@ -1,6 +1,8 @@
 name: Essais
 
 # Les essais de gitmanager sur Linux, Windows et macOS, a chaque push sur main.
+# Python vient de uv, comme pour lancer le programme : la version minimum, 3.9,
+# reste disponible meme quand GitHub ne la fournit plus.
 on:
   push:
     branches: [main]
@@ -23,11 +25,15 @@ jobs:
           - os: ubuntu-latest
             python: "3.9"  # version minimum de gitmanager
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python }}
+          python-version: "3.13"
+      - name: uv et Python ${{ matrix.python }}
+        run: |
+          python -m pip install --quiet uv
+          uv python install ${{ matrix.python }}
       - name: Syntaxe
-        run: python -m py_compile gitmanager.py
+        run: uv run --no-project --python ${{ matrix.python }} python -m py_compile gitmanager.py
       - name: Essais
-        run: python -m unittest discover -s tests -v
+        run: uv run --no-project --python ${{ matrix.python }} python -m unittest discover -s tests -v
