@@ -52,7 +52,7 @@ pub fn nettoyer_chemin(saisie: &str) -> PathBuf {
         match comp {
             Component::CurDir => {}
             Component::ParentDir => {
-                if matches!(res.components().last(), Some(Component::Normal(_))) {
+                if matches!(res.components().next_back(), Some(Component::Normal(_))) {
                     res.pop();
                 } else if !res.has_root() {
                     res.push("..");
@@ -147,7 +147,7 @@ pub fn projets_de_la_machine(cfg: &Config) -> Vec<PathBuf> {
         }
     }
     let mut avec_date: Vec<(std::time::SystemTime, PathBuf)> = projets.into_iter().map(|p| (recent(&p), p)).collect();
-    avec_date.sort_by(|a, b| b.0.cmp(&a.0));
+    avec_date.sort_by_key(|x| std::cmp::Reverse(x.0));
     avec_date.into_iter().map(|(_, p)| p).collect()
 }
 

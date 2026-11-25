@@ -96,10 +96,9 @@ pub fn identite_par_defaut(cfg: &Config, user: &Value, cle_git: &str) -> String 
         let nom = champ("name");
         return if nom.is_empty() { champ("login") } else { nom };
     }
-    let id = user.get("id").and_then(Value::as_i64);
-    if host(cfg, None) == "github.com" && id.is_some() && !champ("login").is_empty() {
+    if let Some(id) = user.get("id").and_then(Value::as_i64).filter(|_| host(cfg, None) == "github.com" && !champ("login").is_empty()) {
         // Adresse privee fournie par GitHub : pas de blocage "email prive" au push
-        return format!("{}+{}@users.noreply.github.com", id.unwrap(), champ("login"));
+        return format!("{id}+{}@users.noreply.github.com", champ("login"));
     }
     champ("email")
 }
@@ -339,11 +338,11 @@ pub fn gh_par_navigateur(args: &[&str]) -> i32 {
     for ligne in rx {
         let code = code_re.captures(&ligne);
         let adresse = adresse_re.captures(&ligne);
-        if code.is_some() && !code_vu {
+        if let Some(code) = code.filter(|_| !code_vu) {
             code_vu = true;
             println!();
             info("Code pour la page GitHub :");
-            println!("{}", c(&format!("       {}", &code.unwrap()[1]), "1;33"));
+            println!("{}", c(&format!("       {}", &code[1]), "1;33"));
             ask_libre("Copier ce code, puis Enter pour ouvrir le navigateur", "");
         } else if adresse.as_ref().is_some_and(|a| a[1].contains("device")) && !adresse_vue {
             adresse_vue = true;
@@ -966,6 +965,11 @@ pub fn act_compte(cfg: &mut Config) -> R<Res> {
     }
 }
 
+/// Push refuse : la permission contents=write manque au jeton ou a la connexion.
+pub fn mettre_a_jour_permissions_push(cfg: &mut Config) -> bool {
+    crate::github::mettre_a_jour_permissions(cfg, "contents=write, push dans ce repo", None)
+}
+
 #[cfg(test)]
 mod essais {
     use super::*;
@@ -984,7 +988,3 @@ mod essais {
     }
 }
 
-/// Push refuse : la permission contents=write manque au jeton ou a la connexion.
-pub fn mettre_a_jour_permissions_push(cfg: &mut Config) -> bool {
-    crate::github::mettre_a_jour_permissions(cfg, "contents=write, push dans ce repo", None)
-}

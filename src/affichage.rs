@@ -102,11 +102,6 @@ pub fn ljust(t: &str, largeur: usize) -> String {
     if n >= largeur { t.to_string() } else { format!("{t}{}", " ".repeat(largeur - n)) }
 }
 
-pub fn rjust(t: &str, largeur: usize) -> String {
-    let n = nb_car(t);
-    if n >= largeur { t.to_string() } else { format!("{}{t}", " ".repeat(largeur - n)) }
-}
-
 pub fn couper(texte: &str, largeur: usize) -> String {
     if nb_car(texte) <= largeur {
         return texte.to_string();

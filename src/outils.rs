@@ -161,10 +161,10 @@ pub fn empreinte_paquet(g: &str) -> String {
     if g == "apt-get" {
         let (_, version) = sortie_cmd(&["dpkg-query", "-W", "-f=${Version}", "git"]);
         let (_, out) = sortie_cmd(&["apt-cache", "show", "git"]);
+        let empreinte = regex::Regex::new(r"(?m)^SHA256: ([0-9a-f]{64})$").unwrap();
         for bloc in out.split("\n\n") {
             if !version.trim().is_empty() && format!("\n{bloc}\n").contains(&format!("\nVersion: {}\n", version.trim())) {
-                return regex::Regex::new(r"(?m)^SHA256: ([0-9a-f]{64})$").unwrap()
-                    .captures(bloc).map(|m| m[1].to_string()).unwrap_or_default();
+                return empreinte.captures(bloc).map(|m| m[1].to_string()).unwrap_or_default();
             }
         }
     }

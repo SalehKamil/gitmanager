@@ -2,7 +2,9 @@
 
 use crate::affichage::{c, sortie, warn};
 use crate::session;
-use std::io::{BufRead, IsTerminal};
+use std::io::IsTerminal;
+#[cfg(not(test))]
+use std::io::BufRead;
 use std::time::{Duration, Instant};
 
 /// Connexion en memoire oubliee apres 15 minutes sans saisie
@@ -23,7 +25,7 @@ fn lire_ligne(echo: bool) -> Option<String> {
     #[cfg(test)]
     {
         let _ = echo;
-        return ESSAI.with(|e| e.borrow_mut().pop_front());
+        ESSAI.with(|e| e.borrow_mut().pop_front())
     }
     #[cfg(not(test))]
     {

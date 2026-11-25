@@ -1,6 +1,5 @@
 //! gitmanager : coder a la maison, pousser au bureau, gerer les repos GitHub
 //! en local comme en ligne. Les menus remplacent les commandes Git.
-#![allow(dead_code)] // le temps de la reecriture : retire a la fin de la tache 5
 
 mod affichage;
 mod comparer;

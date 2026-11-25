@@ -23,6 +23,8 @@ pub struct Faux {
     /// None : tout jeton peut supprimer
     pub jetons_admin: Option<HashSet<String>>,
     pub distants: PathBuf,
+    /// repo supprime sur GitHub juste apres sa lecture, comme dans le navigateur
+    pub disparait: Option<String>,
 }
 
 impl Faux {
@@ -63,6 +65,7 @@ impl Faux {
             d["private"] = data["private"].clone();
             self.supprimes.remove(d["full_name"].as_str().unwrap());
             let nu = self.distants.join(&self.login).join(format!("{nom}.git"));
+            let _ = std::fs::remove_dir_all(&nu); // nouveau repo : rien de l'ancien
             Command::new("git").args(["init", "-q", "--bare", "-b", "main"]).arg(&nu).status().unwrap();
             return (201, d, vec![]);
         }
@@ -92,6 +95,10 @@ impl Faux {
                 }
             }
             if morceaux.len() == 2 && verbe == "GET" {
+                if self.disparait.as_deref() == Some(full.as_str()) {
+                    self.supprimes.insert(full);
+                    self.retard_liste = false;
+                }
                 return (200, d, vec![]);
             }
         }
@@ -142,7 +149,7 @@ impl Banc {
         std::fs::write(maison.join(".gitmanager.json"), serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
         let github = Arc::new(Mutex::new(Faux {
             login: "saleh".into(), repos: vec![], supprimes: HashSet::new(), retard_liste: true,
-            appels: vec![], jetons_admin: None, distants: distants.clone(),
+            appels: vec![], jetons_admin: None, distants: distants.clone(), disparait: None,
         }));
         let serveur = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let api = format!("http://{}", serveur.server_addr().to_ip().unwrap());

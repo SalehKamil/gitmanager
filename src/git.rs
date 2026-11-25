@@ -206,7 +206,7 @@ pub fn traduire_git(ligne: &str) -> Option<String> {
 }
 
 pub fn derniere_ligne(texte: &str) -> String {
-    let derniere = texte.lines().map(str::trim).filter(|l| !l.is_empty() && !BRUIT_GIT.is_match(l)).last();
+    let derniere = texte.lines().map(str::trim).rfind(|l| !l.is_empty() && !BRUIT_GIT.is_match(l));
     let Some(l) = derniere else { return String::new() };
     Regex::new(r"(?i)^(fatal|error|erreur|remote):\s*").unwrap().replace(l, "").into_owned()
 }
@@ -428,6 +428,7 @@ pub fn racine_repo(chemin: &Path) -> Option<PathBuf> {
 /// (racine ou None, etat) : ok, absent, bloque ou illisible.
 pub fn acces_repo(chemin: &Path) -> (Option<PathBuf>, &'static str) {
     let mut e = String::new();
+    let safe = Regex::new(r"(?m)safe\.directory\s+'?([^'\n]+?)'?\s*$").unwrap();
     for essai in [1, 2] {
         let (code, out, erreurs) = git(&["rev-parse", "--show-toplevel"], Some(chemin));
         if code == 0 && !out.is_empty() {
@@ -438,8 +439,7 @@ pub fn acces_repo(chemin: &Path) -> (Option<PathBuf>, &'static str) {
             break;
         }
         // Git bloque un repo dont le dossier appartient a un autre compte du poste
-        let cible = Regex::new(r"(?m)safe\.directory\s+'?([^'\n]+?)'?\s*$").unwrap()
-            .captures(&e).map(|m| m[1].to_string()).unwrap_or_else(|| chemin.display().to_string());
+        let cible = safe.captures(&e).map(|m| m[1].to_string()).unwrap_or_else(|| chemin.display().to_string());
         println!();
         warn("Git bloque ce repo : son dossier appartient a un autre compte de cette machine.");
         info("Git protege ainsi les dossiers des autres comptes, par exemple apres une copie");
