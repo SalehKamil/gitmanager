@@ -27,7 +27,8 @@ session tout seul. Sinon, chaque option demande la connexion a son compte
 GitHub ; sans connexion, retour au menu principal. Les deux comptes restent
 separes. Les textes du programme evitent les mots qui prennent un accent.
 
-  1. Repos GitHub perso, connexion au compte GitHub perso
+  1. Gerer les repos GitHub, connexion au compte GitHub perso ; une fois
+     connecte, le choix et le titre du menu portent le nom du compte
      - Repos GitHub en ligne : recherche, fichiers, commits, public ou non
        public, ouvrir la copie sur cette machine ou cloner le projet, ouvrir
        la copie en ligne, comparer en ligne et en local dans un tableau a
@@ -105,7 +106,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.13.1"
+__version__ = "2.13.2"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -4872,8 +4873,13 @@ def lancer(fn, cfg, avec_pause=True):
         pause()
 
 
+def nom_affiche(user):
+    """Nom du compte GitHub connecte, sinon son identifiant."""
+    return (user or {}).get("name") or (user or {}).get("login") or ""
+
+
 def ligne_compte(cfg):
-    print(c(f"  Compte GitHub {nom_compte()} : {SESSION['user'].get('login')}, "
+    print(c(f"  Compte GitHub {SESSION['user'].get('login')}, "
             f"{NOMS_METHODES[SESSION['methode']]}, {host(cfg)}", "36"))
 
 
@@ -4920,12 +4926,13 @@ def choisir_fonction(cfg):
     while True:
         verifier_gardes(cfg)
         titre("MENU PRINCIPAL")
-        actions, connectes = actions_principales(cfg)
-        for nom in connectes:
-            print(c(f"  Compte GitHub {nom_compte(nom)} : {PROFILS[nom]['user'].get('login')}", "36"))
+        actions, _ = actions_principales(cfg)
+        perso, pro = PROFILS["perso"]["user"], PROFILS["entreprise"]["user"]
         print()
-        print("    1. Repos GitHub perso")
-        print("    2. Entreprise : import et repos GitHub de l'entreprise")
+        print("    1. " + (f"Repos GitHub de {nom_affiche(perso)}" if perso
+                           else "Gerer les repos GitHub"))
+        print("    2. Entreprise : import et repos GitHub de l'entreprise"
+              + (f", compte {nom_affiche(pro)}" if pro else ""))
         for i, (libelle, _) in enumerate(actions, 3):
             print(f"    {i}. {libelle}")
         print("    0. Quitter")
@@ -4959,7 +4966,7 @@ def menu_repos(cfg, nom_menu):
         if NAVIGATION["menu_principal"]:
             return
         user = SESSION["user"] or {}
-        titre(nom_menu.format(nom=user.get("name") or user.get("login") or ""))
+        titre(nom_menu.format(nom=nom_affiche(user)))
         ligne_compte(cfg)
         cles = cles_enregistrees(cfg)
         if cles:

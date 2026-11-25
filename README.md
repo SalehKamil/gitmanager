@@ -75,10 +75,12 @@ CLI, des installateurs et de GitHub sont traduits ou cachés.
 Dans chaque menu, Enter revient en arrière d'un niveau ; au menu principal,
 Enter quitte le programme.
 
-### Option 1 : repos GitHub perso
+### Option 1 : gérer les repos GitHub
 
-Connexion au compte GitHub perso. Le titre du menu porte le nom du compte
-connecté, par exemple Repos GitHub de Saleh Kamil.
+Connexion au compte GitHub perso. Une fois connecté, le choix du menu
+principal et le titre du menu portent le nom du compte, par exemple Repos
+GitHub de Saleh Kamil. Sans nom dans le profil GitHub, l'identifiant du
+compte le remplace.
 
 1. Repos GitHub en ligne : la liste des repos sur GitHub, avec une
    recherche par nom ; le numéro d'un repo l'ouvre.
