@@ -106,9 +106,12 @@ class Banc(unittest.TestCase):
         Path(config).write_text(
             "[user]\n\tname = Essai\n\temail = essai@example.com\n"
             "[init]\n\tdefaultBranch = main\n"
-            f'[url "file://{self.distants}/"]\n\tinsteadOf = https://github.com/\n',
+            f'[url "{Path(self.distants).as_uri()}/"]\n\tinsteadOf = https://github.com/\n',
             encoding="utf-8")
-        os.environ.update(HOME=self.maison, GIT_CONFIG_GLOBAL=config, GIT_CONFIG_NOSYSTEM="1")
+        # HOME : Linux et macOS ; USERPROFILE : Windows
+        os.environ.update(HOME=self.maison, USERPROFILE=self.maison, GIT_CONFIG_GLOBAL=config,
+                          GIT_CONFIG_NOSYSTEM="1")
+        os.environ.pop("XDG_CONFIG_HOME", None)
         os.environ.pop("DISPLAY", None)
         os.environ.pop("WAYLAND_DISPLAY", None)
         self.cfg = {"espace": os.path.join(self.maison, "projets")}
@@ -456,6 +459,30 @@ class LierAvecGitHub(Banc):
 
 
 class Menus(Banc):
+    def test_oui_non_redemande_une_faute_de_frappe(self):
+        res, sortie = self.lancer(gm.ask_yn, "Continuer ?", True, reponses=["oiu", "n"])
+        self.assertFalse(res)
+        self.assertIn("Repondre o pour oui", sortie)
+
+    def test_dossier_par_un_lien_symbolique(self):
+        self.distant("demo")
+        local = self.copie("demo")
+        lien = os.path.join(self.tmp, "lien-demo")
+        try:
+            os.symlink(local, lien, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("liens symboliques indisponibles")
+        _, sortie = self.lancer(gm.ouvrir_dossier, self.cfg, lien, reponses=["0"])
+        self.assertNotIn("fait partie du repo git", sortie)
+
+    def test_menus_nomment_les_commandes_git(self):
+        self.distant("demo")
+        local = self.copie("demo")
+        _, sortie = self.lancer(gm.menu_projet, self.cfg, local, reponses=["0"])
+        for libelle in ("commit + push", "pull", "log, diff", "branch, switch, merge",
+                        "restore, revert", "git stash", "force push", "remote"):
+            self.assertIn(libelle, sortie)
+
     def test_titre_avec_le_nom_du_compte(self):
         self.distant("demo")
         # 1 en ligne, Enter ; 2 en local, Enter ; 3 compte, 0 sans pause ; 0 retour
@@ -593,6 +620,7 @@ class Revue(Banc):
                         .startswith("Annulation du commit"))
 
 
+@unittest.skipIf(os.name == "nt", "GitHub CLI factice : script sh, pas sous Windows")
 class Connexion(Banc):
     """Connexion par le navigateur, fin de session et suppression du compte,
     avec un GitHub CLI factice."""

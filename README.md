@@ -68,13 +68,16 @@ repos GitHub, perso ou de l'entreprise, avec une session ouverte.
 
 Chaque commande Git qui change un repo s'affiche, l'action Git en rouge,
 avec son résultat en français : `git add`, `git commit`, `git push`,
-`git pull` et les autres. Tout
+`git pull` et les autres. Les choix des menus nomment aussi l'action Git
+qu'ils lancent : `log`, `diff`, `switch`, `merge`, `restore`, `revert`,
+`stash`. Tout
 le programme s'affiche en français : les messages en anglais de Git, de GitHub
 CLI, des installateurs et de GitHub sont traduits ou cachés.
 
 Dans chaque menu, Enter revient en arrière d'un niveau ; au menu principal,
 Enter quitte le programme. Quand une valeur est proposée entre crochets,
-Enter la garde et 0 revient en arrière.
+Enter la garde et 0 revient en arrière. À une question oui ou non, une
+réponse mal tapée est redemandée.
 
 ### Option 1 : gérer les repos GitHub
 
@@ -196,6 +199,9 @@ python -m unittest discover -s tests -v
 Avec `GM_VOIR=1`, les écrans du programme s'affichent aussi. La connexion
 par le navigateur passe par un GitHub CLI factice : la vraie connexion à
 GitHub reste à essayer sur la machine.
+
+Sur GitHub, les essais tournent à chaque push sur main, sous Linux, Windows
+et macOS, avec Python 3.13 et 3.9, la version minimum.
 
 ## Sécurité
 

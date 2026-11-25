@@ -1,0 +1,33 @@
+name: Essais
+
+# Les essais de gitmanager sur Linux, Windows et macOS, a chaque push sur main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  essais:
+    name: ${{ matrix.os }}, Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.13"]
+        include:
+          - os: ubuntu-latest
+            python: "3.9"  # version minimum de gitmanager
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Syntaxe
+        run: python -m py_compile gitmanager.py
+      - name: Essais
+        run: python -m unittest discover -s tests -v
