@@ -105,7 +105,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-__version__ = "2.13.0"
+__version__ = "2.13.1"
 CONFIG = Path.home() / ".gitmanager.json"
 
 GITIGNORE = """__pycache__/
@@ -657,8 +657,14 @@ def url_remote(nom, chemin):
 
 
 def fichiers_modifies(chemin):
-    code, out, _ = git("status", "--porcelain", cwd=chemin, quiet=True)
-    return [l for l in out.splitlines() if l.strip()] if code == 0 else []
+    """Fichiers au commit manquant. Un sous-repo git ne compte pas : son contenu
+    ne part jamais avec ce repo."""
+    code, out, _ = git("status", "--porcelain", "--ignore-submodules=all", cwd=chemin, quiet=True)
+    if code != 0:
+        return []
+    return [l for l in out.splitlines() if l.strip() and not (
+        l.startswith("?? ") and l.endswith("/")
+        and os.path.exists(os.path.join(chemin, l[3:].strip('"'), ".git")))]
 
 
 def fichiers_en_conflit(chemin):
@@ -3647,9 +3653,12 @@ def fichiers_en_local(chemin):
 
 def etats_locaux(chemin):
     """{fichier: code XY de git status} des fichiers au commit manquant."""
-    _, out, _ = git("status", "--porcelain", "-z", cwd=chemin, quiet=True)
+    _, out, _ = git("status", "--porcelain", "-z", "--ignore-submodules=all", cwd=chemin,
+                    quiet=True)
     etats = {}
     for rec in (r for r in out.split("\0") if len(r) > 3):
+        if rec.endswith("/") and os.path.exists(os.path.join(chemin, rec[3:], ".git")):
+            continue  # repo git dans ce repo : hors comparaison
         etats[rec[3:]] = rec[:2]
     return etats
 
@@ -3657,12 +3666,34 @@ def etats_locaux(chemin):
 def ecarts_fichiers(chemin, ref):
     """Fichiers dont le contenu differe entre ref et le dossier, fichiers sans
     commit compris : liste de (fichier, present en ligne, present en local)."""
-    _, ns, _ = git("diff", "--no-renames", "--name-only", "-z", ref, "--", cwd=chemin, quiet=True)
+    _, ns, _ = git("diff", "--no-renames", "--name-only", "-z", "--ignore-submodules=all", ref,
+                   "--", cwd=chemin, quiet=True)
     _, autres, _ = git("ls-files", "--others", "--exclude-standard", "-z", cwd=chemin, quiet=True)
-    noms = {f for f in ns.split("\0") if f} | {f for f in autres.split("\0") if f}
+    # "dossier/" : un repo git dans ce repo, hors comparaison comme les sous-repos
+    noms = {f for f in ns.split("\0") if f} | {f for f in autres.split("\0") if f and f[-1] != "/"}
     en_ligne = fichiers_en_ligne(chemin, ref)
-    return sorted(((f, f in en_ligne, os.path.lexists(os.path.join(chemin, f))) for f in noms),
-                  key=lambda e: e[0].lower())
+    ecarts = []
+    for f in sorted(noms, key=str.lower):
+        present_ligne, present_local = f in en_ligne, os.path.lexists(os.path.join(chemin, f))
+        if present_ligne and present_local:
+            gauche = contenu_en_ligne(chemin, ref, f)
+            # meme texte, seules les fins de ligne changent : Windows, CRLF
+            if gauche is not None and gauche == lignes_texte(os.path.join(chemin, f)):
+                continue
+        ecarts.append((f, present_ligne, present_local))
+    return ecarts
+
+
+def sous_repos(chemin, ref):
+    """Noms des repos git dans ce repo : lien en ligne, mode 160000, ou dossier
+    avec son propre .git sur cette machine."""
+    _, out, _ = git("ls-tree", "-r", "-z", ref, cwd=chemin, quiet=True)
+    noms = {rec.partition("\t")[2] for rec in out.split("\0") if rec.startswith("160000 ")}
+    _, autres, _ = git("ls-files", "--others", "--exclude-standard", "--directory", "-z",
+                       cwd=chemin, quiet=True)
+    noms |= {f[:-1] for f in autres.split("\0")
+             if f.endswith("/") and os.path.exists(os.path.join(chemin, f, ".git"))}
+    return sorted(n for n in noms if n)
 
 
 def contenu_en_ligne(chemin, ref, fichier):
@@ -3770,6 +3801,11 @@ def comparer_copies(cfg, d, chemin):
     ]
     ecarts = ecarts_fichiers(chemin, ref)
     print()
+    sous = sous_repos(chemin, ref)
+    if sous:
+        info(f"Hors comparaison, {len(sous)} sous-repo(s) git : {', '.join(sous)}.")
+        info("Leur contenu ne part pas avec ce repo : GitHub les montre en dossiers vides.")
+        print()
     if not ecarts and not seulement_ligne and not seulement_local:
         ok("Les deux copies sont pareilles : aucune difference en local et en ligne.")
         return None

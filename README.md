@@ -133,7 +133,8 @@ connecté, par exemple Repos GitHub de Saleh Kamil.
      `git stash`, ou restent, au choix.
    - Repo git dans un autre repo : avant le commit, le programme le signale
      et propose de le laisser hors du commit, dans le `.gitignore`. Sans
-     ce choix, GitHub montre un dossier vide à sa place.
+     ce choix, GitHub montre un dossier vide à sa place. La comparaison en
+     ligne et en local le laisse de côté.
 
 ### Option 2 : entreprise
 
